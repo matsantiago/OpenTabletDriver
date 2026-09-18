@@ -1,0 +1,91 @@
+# Pen Pan/Scroll for OpenTabletDriver
+
+Wacom-style pen button-pan/scroll for [OpenTabletDriver](https://github.com/OpenTabletDriver/OpenTabletDriver) on **macOS**.
+
+Hold a pen button, touch the nib, and drag: the pointer stays exactly where it was and the screen scrolls — both axes, natural direction (drag up = scroll down). Lifting the nib pauses without jumping; release the button for normal pointing.
+
+Built for OpenTabletDriver **0.6.7** (macOS, Absolute Mode), first tested on a Wacom PTK-470. Developed by Oliver Iborra-MacDonald.
+
+## Platform support
+
+| Platform | Status |
+|---|---|
+| macOS | Supported — pixel-precise scrolling via OTD's macOS pointer backend |
+| Windows | Inactive by design — the filter logs "Inactive" and passes all input through. OTD's Windows pointer backend (`WindowsVirtualMouse`) exposes no scroll API, so Windows support would be a separate implementation (see Forking below) |
+| Linux | Inactive by design — the Linux scroll backend was not verified for this plugin, and the code gates to macOS anyway, so it passes input through. PRs welcome (see Forking below) |
+
+The plugin never blocks or alters input on unsupported platforms: worst case, nothing happens.
+
+## Forking for Windows / Linux
+
+MIT-licensed — fork freely, no permission needed (keep the copyright notice). What's portable and what isn't:
+
+- **Portable as-is:** the filter pipeline (`IPositionedPipelineElement` at `PreTransform`), tablet geometry + Absolute Mode, and all gesture math (anchor, pressure-zeroing, fractional accumulation). ~90% of the code.
+- **Not portable:** the scroll sink. The filter casts OTD's live pointer to `IMouseScrollHandler`. macOS implements it with pixel precision; Windows does not implement it at all (verified in OTD source); Linux is unverified and the current code's `OperatingSystem.IsMacOS()` gate blocks it regardless.
+- **What a port needs:** remove/extend the OS gate, then emit scroll through the target OS — on Windows that's `SendInput` `MOUSEEVENTF_WHEEL`/`HWHEEL` in `WHEEL_DELTA` (120) units rather than pixels, so sensitivity needs re-scaling; on Linux it means checking the current backend's name/path and emitting the equivalent wheel events. Either way it needs a real tablet + OTD 0.6.7 on that OS to verify feel — no Mac-side test can prove it.
+
+## How it works (short version)
+
+The filter sits in OTD's input pipeline before coordinate transformation. While the chosen pen button is held and the nib is touching:
+
+- the pointer **anchors** (position frozen, pressure zeroed — no accidental clicks or drags),
+- pen travel is converted to scroll pixels (`pixels = mm × sensitivity`), with sub-pixel motion accumulated so slow drags stay smooth,
+- both scroll axes queue on OTD's own macOS virtual mouse and flush through its normal output cycle — no second, conflicting pointer.
+
+Direction is tuned to macOS natural scrolling: upward pen motion scrolls the page down. Each axis is independently reversible and can be disabled (sensitivity 0).
+
+## Install
+
+1. OpenTabletDriver **0.6.7** on macOS, in **Absolute Mode**.
+2. Either:
+   - **Plugins tab** of OpenTabletDriver → drag and drop `PenPanScroll-1.0.0.zip` from the [Releases](https://github.com/djoliverm/otd-penpanscroll/releases), **or**
+   - close OTD, create `~/Library/Application Support/OpenTabletDriver/Plugins/PenPanScroll/` and put `PenPanScroll.dll` inside it (any folder name works; version lives in the plugin metadata, not the folder).
+3. Restart OTD → **Filters** → enable **Pen Pan/Scroll** → set your scroll button → **Save**.
+4. Optionally drop a `metadata.json` next to the DLL (see `metadata.json` in this repo) so the Plugin Manager shows owner/license/description.
+
+> Keep the filter first in the filter list if you have other filters that alter position, pressure, or buttons.
+
+## Use
+
+1. Point at the scrollable content.
+2. Hold pen button 1 (default) and touch the nib to the tablet.
+3. Drag up to scroll down, sideways to scroll horizontally.
+4. Lift the nib to reposition; touch down for another stroke.
+5. Release the button to resume ordinary absolute pointing. If the nib is still down, lift it before clicking again.
+
+Your other pen buttons keep their existing bindings (e.g. button 2 right-click). There is no momentum; the app must support normal mouse-wheel/pixel scrolling.
+
+## Settings
+
+| Setting | Default | Meaning |
+|---|---|---|
+| Scroll button | 1 | One-based pen button that triggers panning (see OTD's debugger to identify). Its normal binding is suppressed while panning |
+| Horizontal / Vertical sensitivity | 10 px/mm | Scroll pixels per mm of pen travel. 0 disables that axis. 0–1000 |
+| Reverse horizontal / vertical | off | Invert that axis |
+
+## Build & test
+
+Requires the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) and an installed OpenTabletDriver 0.6.7 app. No NuGet packages are downloaded (references come from the installed app).
+
+```sh
+dotnet build src/PenPanScroll.csproj -c Release
+dotnet run --project tests -c Release
+```
+
+If OTD is installed elsewhere, pass `-p:OtdDirectory=/absolute/path/to/OpenTabletDriver.app/Contents/MacOS`. The compiled plugin is `src/bin/Release/net8.0/PenPanScroll.dll`. For direct installation, package that DLL together with the root `metadata.json`; keep both files at the archive's top level.
+
+Tests drive the real OTD report, binding, and absolute-output classes with a recording pointer: direction, anchoring, fractional accumulation, lift/re-contact, both button-release orders, right-click preservation, proximity loss, disposal, and fail-open behavior. They do not substitute for physical tablet testing.
+
+## Releasing a new version
+
+1. Bump `<Version>` in `src/PenPanScroll.csproj` and `PluginVersion` in `metadata.json` (four-part, e.g. `1.1.0.0`).
+2. `dotnet build src -c Release`, then package the DLL into a zip named after the release (DLL at the archive's top level) and upload it to a GitHub Release.
+3. If the plugin is in the OTD marketplace, update `DownloadUrl`/`SHA256`/`PluginVersion` in `marketplace/` and open the PR.
+
+## Sharing via the OTD marketplace
+
+`marketplace/` contains the metadata JSON for the [OpenTabletDriver Plugin Repository](https://github.com/OpenTabletDriver/Plugin-Repository) (optional — the repo + Releases work standalone). File path in the marketplace: `Repository/{DriverVersion}/{Owner}/{Repo}/PenPanScroll.json`.
+
+## License
+
+[MIT](LICENSE) — do whatever you want, no warranty. OpenTabletDriver itself is LGPL-3.0; this plugin only references its public API.

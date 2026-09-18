@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    # Runs the 16-scenario suite on all three OSes. The tests use real OTD
+    # classes with a fake pointer, so they are platform-independent — this
+    # proves the plugin compiles and behaves on each platform, not that the
+    # OS-level scroll backend works (macOS-only by design).
+    #
+    # Reference assemblies come from the OTD 0.6.7 macOS release, which is
+    # the only release archive with loose .NET DLLs (the Windows zip and
+    # Linux tarball ship self-contained binaries / system packages). The
+    # managed OTD assemblies are platform-neutral, so they work as compile
+    # references on every runner.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Fetch OTD 0.6.7 reference assemblies
+        shell: bash
+        run: |
+          mkdir -p otd-ref
+          curl -sL -o otd-ref/otd.tar.gz "https://github.com/OpenTabletDriver/OpenTabletDriver/releases/download/v0.6.7/OpenTabletDriver-0.6.7_osx-x64.tar.gz"
+          tar xzf otd-ref/otd.tar.gz -C otd-ref
+          ls "otd-ref/OpenTabletDriver.app/Contents/MacOS/OpenTabletDriver.Plugin.dll"
+      - name: Build
+        shell: bash
+        run: dotnet build src/PenPanScroll.csproj -c Release -p:UseSharedCompilation=false "-p:OtdDirectory=$GITHUB_WORKSPACE/otd-ref/OpenTabletDriver.app/Contents/MacOS"
+      - name: Test
+        shell: bash
+        run: dotnet run --project tests -c Release -p:UseSharedCompilation=false "-p:OtdDirectory=$GITHUB_WORKSPACE/otd-ref/OpenTabletDriver.app/Contents/MacOS"
