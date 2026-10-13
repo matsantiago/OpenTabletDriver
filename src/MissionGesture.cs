@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace PenPanScroll;
 
-internal readonly record struct KeyboardModifiers(bool Control, bool Shift);
+internal readonly record struct KeyboardModifiers(bool Control, bool Shift, bool Option = false);
 
 internal enum MissionAction { Overview, Dismiss, SpaceLeft, SpaceRight }
 
@@ -47,7 +47,8 @@ internal static class MacMissionControl
         // Read physical HID key state. Our synthetic scroll/shortcut events
         // deliberately clear modifier flags and must not affect this decision.
         return new(CGEventSourceKeyState(1, 59) || CGEventSourceKeyState(1, 62),
-            CGEventSourceKeyState(1, 56) || CGEventSourceKeyState(1, 60));
+            CGEventSourceKeyState(1, 56) || CGEventSourceKeyState(1, 60),
+            CGEventSourceKeyState(1, 58) || CGEventSourceKeyState(1, 61));
     }
 
     internal static void Send(MissionAction action)

@@ -10,6 +10,10 @@ In Relative Mode, the filter keeps a virtual coordinate offset. Releasing the sc
 
 Optional contact clicks: set **Contact click button** to a different pen button and choose **Right** or **Middle**. Holding that side button alone never clicks. Touching the nib replaces the left click with the chosen click; lifting releases it. Releasing the side button while touching releases the click and suppresses left click until the nib lifts. Scroll has priority if both buttons are held. Zero disables contact-click substitution.
 
+## Control + Option middle click
+
+Enable **Control + Option middle click**: hold Control and Option, then touch the nib to hold the middle mouse button. Moving the nib drags normally; lifting releases. Hover alone does not click. This chord takes priority over Control scroll and Mission gestures. Releasing Option while touching releases middle click and suppresses left click until lift; it cannot become scroll in the same stroke. Reads left/right Option from physical key state.
+
 ## Keyboard gesture mapping
 
 Set **Scroll trigger** to **Control**: Control + nib drag scrolls with the cursor anchored. Enable **Control + Shift Mission gestures**: Control + Shift + nib drag opens/dismisses Mission Control or switches Spaces. The two chords are mutually exclusive. Hover never scrolls. Lift the nib before switching modes; changing Shift while touching cannot fire the other action.
@@ -113,7 +117,7 @@ dotnet run --project tests -c Release -p:OtdDirectory=/path/to/OTD/assemblies
 
 For a self-contained single-file app, use the source build directory `OpenTabletDriver.Desktop/bin/Release/net10.0` containing the matching assemblies. Pass `-p:OtdDirectory=/absolute/path/to/OpenTabletDriver.app/Contents/MacOS`. The compiled plugin is `src/bin/Release/net10.0/PenPanScroll.dll`. For direct installation, package that DLL together with the root `metadata.json`; keep both files at the archive's top level.
 
-The 31 tests drive the real OTD report, binding, absolute-output, and relative-output classes with a recording pointer: direction, anchoring, fractional accumulation, lift/re-contact, both button-release orders, right-click preservation, proximity loss, disposal, and fail-open behavior. They do not substitute for physical tablet testing.
+The 33 tests drive the real OTD report, binding, absolute-output, and relative-output classes with a recording pointer: direction, anchoring, fractional accumulation, lift/re-contact, both button-release orders, right-click preservation, proximity loss, disposal, and fail-open behavior. They do not substitute for physical tablet testing.
 
 ## Releasing a new version
 

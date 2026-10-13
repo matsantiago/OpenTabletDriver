@@ -2,7 +2,7 @@
   "Name": "Pen Pan/Scroll",
   "Owner": "Matheus Santiago (fork of Oliver Iborra-MacDonald)",
   "Description": "Pen-button contact scrolling in Absolute and Relative Mode on macOS, with optional right/middle contact-click substitution. Targets the native .NET 10 OTD build. Control + nib gestures open Mission Control and switch Spaces. Configurable relative pointer acceleration gated by speed and recent travel.",
-  "PluginVersion": "1.5.0.0",
+  "PluginVersion": "1.6.0.0",
   "SupportedDriverVersion": "0.6.7.0",
   "RepositoryUrl": "https://github.com/matsantiago/otd-penpanscroll",
   "WikiUrl": "https://github.com/matsantiago/otd-penpanscroll/blob/main/README.md",

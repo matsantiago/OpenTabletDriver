@@ -70,6 +70,10 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
      ToolTip("Control + Shift + nib drag: up opens Mission Control, right moves to the left Space, left to the right Space. One action per stroke.")]
     public bool MissionGestures { get; set; }
 
+    [Property("Control + Option middle click"), DefaultPropertyValue(false),
+     ToolTip("Control + Option + nib contact holds the middle mouse button. Lift to release. Overrides scroll and Mission gestures.")]
+    public bool MiddleClickGesture { get; set; }
+
     [Property("Mission gesture distance"), DefaultPropertyValue(5.0), Unit("mm")]
     public double MissionThreshold
     {
@@ -158,16 +162,18 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
 
             bool contact = pen.Pressure > 0;
             var modifiers = ReadModifiers();
-            bool wantsMission = MissionGestures && modifiers.Control && modifiers.Shift;
-            bool wantsScroll = ScrollTrigger == "Control" && modifiers.Control && !modifiers.Shift;
+            bool wantsMiddle = MiddleClickGesture && modifiers.Control && modifiers.Option;
+            bool wantsMission = MissionGestures && modifiers.Control && modifiers.Shift && !wantsMiddle;
+            bool wantsScroll = ScrollTrigger == "Control" && modifiers.Control && !modifiers.Shift && !wantsMiddle;
             if (!contact) keyboardGesture = 0;
             else if (keyboardGesture == 0)
-                keyboardGesture = wantsMission ? 2 : wantsScroll ? 1 : 0;
+                keyboardGesture = wantsMiddle ? 3 : wantsMission ? 2 : wantsScroll ? 1 : 0;
             // A contact stroke belongs to exactly one mode. Releasing or adding
             // Shift mid-stroke never fires the other mode; lift to switch.
             bool keyboardScroll = wantsScroll && (!contact || keyboardGesture == 1);
             bool mission = wantsMission && (!contact || keyboardGesture == 2);
-            bool penScroll = ScrollTrigger == "Pen button" && pen.PenButtons[ButtonNumber - 1];
+            bool middle = wantsMiddle && (!contact || keyboardGesture == 3);
+            bool penScroll = !middle && ScrollTrigger == "Pen button" && pen.PenButtons[ButtonNumber - 1];
             var missionAction = missionGesture.Process(pen.Position, contact, mission,
                 scaleX, scaleY, MissionThreshold);
             bool clickButton = ClickButtonNumber > 0 && (ScrollTrigger != "Pen button" || ClickButtonNumber != ButtonNumber) &&
@@ -180,7 +186,9 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
             // button to the normal left click. Scroll takes precedence.
             bool clickConfigured = mouse != null && ClickButtonNumber > 0 && (ScrollTrigger != "Pen button" || ClickButtonNumber != ButtonNumber) &&
                 ClickButtonNumber <= pen.PenButtons.Length;
-            bool wantsClick = clickConfigured && clickButton && contact && !result.SuppressTip;
+            bool wantsClick = contact && (middle || (clickConfigured && clickButton && !result.SuppressTip));
+            var desiredClick = middle ? MouseButton.Middle : ClickType == "Middle" ? MouseButton.Middle : MouseButton.Right;
+            if (wantsClick && clickDown != null && clickDown != desiredClick) ReleaseContactClick();
             if (!contact)
                 suppressClickUntilLift = false;
             if (!wantsClick && clickDown != null)
@@ -190,18 +198,18 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
             }
             if (wantsClick && clickDown == null)
             {
-                clickDown = ClickType == "Middle" ? MouseButton.Middle : MouseButton.Right;
+                clickDown = desiredClick;
                 mouse!.MouseDown(clickDown.Value);
             }
 
             pen.Position = result.Position;
-            if (result.SuppressTip || (clickConfigured && clickButton) || suppressClickUntilLift)
+            if (middle || result.SuppressTip || (clickConfigured && clickButton) || suppressClickUntilLift)
                 pen.Pressure = 0;
-            if (result.SuppressButton || clickConfigured)
+            if (middle || result.SuppressButton || clickConfigured)
             {
                 // Do not mutate arrays shared with the parser/debugger.
                 pen.PenButtons = (bool[])pen.PenButtons.Clone();
-                if (keyboardScroll || mission)
+                if (middle || keyboardScroll || mission)
                     Array.Fill(pen.PenButtons, false);
                 else if (result.SuppressButton && ScrollTrigger == "Pen button")
                     pen.PenButtons[ButtonNumber - 1] = false;

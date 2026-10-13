@@ -9,6 +9,47 @@ using OpenTabletDriver.Plugin.Tablet;
 
 var tests = new (string, Action)[]
 {
+    ("Control Option middle: touch only, movement preserved, no scroll or Mission, release on lift", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Filter.ScrollTrigger = "Control";
+        h.Filter.MissionGestures = h.Filter.MiddleClickGesture = true;
+        h.Filter.ReadModifiers = () => new(true, false, true);
+        h.Filter.SendMissionAction = _ => throw new Exception("Unexpected Mission");
+        h.Filter.SendKeyboardScroll = (x, y) => { Check(x == 0 && y == 0); };
+        h.Send(10000, 10000);
+        Check(!h.Pointer.Events.Contains("down:Middle"));
+        h.Send(10000, 10000, true);
+        Check(h.Pointer.Events.Count(e => e == "down:Middle") == 1 && !h.Pointer.Left);
+        h.Send(10200, 10000, true);
+        Check(h.Pointer.Events.Count(e => e == "down:Middle") == 1);
+        Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f);
+        h.Send(10200, 10000);
+        Check(h.Pointer.Events.Count(e => e == "up:Middle") == 1);
+    }),
+    ("Middle chord release cannot become scroll or left click before lift; range loss releases", () =>
+    {
+        using var h = new Harness(relative: true);
+        bool option = true;
+        h.Filter.ScrollTrigger = "Control";
+        h.Filter.MiddleClickGesture = true;
+        h.Filter.ReadModifiers = () => new(true, false, option);
+        h.Filter.SendKeyboardScroll = (x, y) => { Check(x == 0 && y == 0); };
+        h.Send(10000, 10000, true);
+        option = false;
+        h.Send(10200, 10000, true);
+        Check(h.Pointer.Events.Contains("up:Middle") && !h.Pointer.Left);
+        h.Send(10400, 10000, true);
+        Check(!h.Pointer.Left && h.Pointer.Scroll == Vector2.Zero);
+        h.Send(10400, 10000);
+        option = true;
+        h.Send(10400, 10000, true);
+        h.Mode.Read(new OutOfRangeReport([]));
+        Check(h.Pointer.Events.Count(e => e == "up:Middle") == 2);
+        h.Send(10400, 10000, true);
+        h.Filter.Dispose();
+        Check(h.Pointer.Events.Count(e => e == "up:Middle") == 3);
+    }),
     ("Mission chord never scrolls, even when Shift is released mid-contact", () =>
     {
         using var h = new Harness(relative: true);
