@@ -15,8 +15,13 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
     private readonly object sync = new();
     private readonly Gesture gesture = new();
     private IMouseScrollHandler? scroll;
+    private IMouseButtonHandler? mouse;
+    private MouseButton? clickDown;
+    private bool suppressClickUntilLift;
+    private int clickButtonNumber;
     private double scaleX, scaleY;
     private bool disposed;
+    private bool relative;
     private int buttonNumber = 1;
     private double sensitivityX = 10, sensitivityY = 10;
 
@@ -43,8 +48,16 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
     [Property("Reverse vertical"), DefaultPropertyValue(false)]
     public bool ReverseY { get; set; }
 
+    [Property("Contact click button"), DefaultPropertyValue(0),
+     ToolTip("One-based pen button selecting a contact click. Zero disables it. Must differ from Scroll button.")]
+    public int ClickButtonNumber { get => clickButtonNumber; set => clickButtonNumber = Math.Clamp(value, 0, 32); }
+
+    [Property("Contact click type"), DefaultPropertyValue("Right"), PropertyValidated(nameof(ClickTypes))]
+    public string ClickType { get; set; } = "Right";
+    public static string[] ClickTypes => ["Right", "Middle"];
+
     public PipelinePosition Position => PipelinePosition.PreTransform;
-    public event Action<IDeviceReport>? Emit;
+    public event Action<IDeviceReport?>? Emit;
 
     [OnDependencyLoad]
     public void Initialize()
@@ -54,28 +67,35 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
         // another native mouse with independent button and pressure state.
         var tree = (Driver as Driver)?.InputDevices.FirstOrDefault(
             device => ReferenceEquals(device.Properties, Tablet?.Properties));
-        if (OperatingSystem.IsMacOS() && tree?.OutputMode is AbsoluteOutputMode output && Tablet != null)
+        if (OperatingSystem.IsMacOS() && tree?.OutputMode is OutputMode output && Tablet != null)
             Configure(Tablet, output);
 
         if (scroll == null)
-            Log.Write("Pen Pan/Scroll", "Inactive: requires macOS, Absolute Mode, and a scroll-capable pointer. Input is passed through.", LogLevel.Error);
+            Log.Write("Pen Pan/Scroll", "Inactive: requires macOS, Absolute or Relative Mode, and a scroll-capable pointer. Input is passed through.", LogLevel.Error);
         else
             Log.Write("Pen Pan/Scroll", $"Ready: pen button {ButtonNumber}, X={SensitivityX}, Y={SensitivityY} px/mm.");
     }
 
-    internal void Configure(TabletReference tablet, AbsoluteOutputMode output)
+    internal void Configure(TabletReference tablet, OutputMode output)
     {
         var digitizer = tablet.Properties.Specifications.Digitizer;
         if (digitizer == null || digitizer.MaxX == 0 || digitizer.MaxY == 0 ||
             !float.IsFinite(digitizer.Width) || !float.IsFinite(digitizer.Height) ||
             digitizer.Width <= 0 || digitizer.Height <= 0)
             return;
-        scroll = output.Pointer as IMouseScrollHandler;
+        relative = output is RelativeOutputMode;
+        scroll = output switch
+        {
+            AbsoluteOutputMode absolute => absolute.Pointer as IMouseScrollHandler,
+            RelativeOutputMode rel => rel.Pointer as IMouseScrollHandler,
+            _ => null
+        };
+        mouse = scroll as IMouseButtonHandler;
         scaleX = (double)digitizer.Width / digitizer.MaxX;
         scaleY = (double)digitizer.Height / digitizer.MaxY;
     }
 
-    public void Consume(IDeviceReport report)
+    public void Consume(IDeviceReport? report)
     {
         lock (sync)
         {
@@ -87,7 +107,9 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
 
             if (report is OutOfRangeReport || report is IProximityReport { NearProximity: false })
             {
-                gesture.Reset();
+                ReleaseContactClick();
+                suppressClickUntilLift = false;
+                gesture.Reset(relative);
                 Emit?.Invoke(report);
                 return;
             }
@@ -102,23 +124,49 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
                 !float.IsFinite(pen.Position.X) || !float.IsFinite(pen.Position.Y) ||
                 ButtonNumber > pen.PenButtons.Length)
             {
-                gesture.Reset();
+                ReleaseContactClick();
+                suppressClickUntilLift = false;
+                gesture.Reset(relative);
                 Emit?.Invoke(report);
                 return;
             }
 
+            bool contact = pen.Pressure > 0;
+            bool clickButton = ClickButtonNumber > 0 && ClickButtonNumber != ButtonNumber &&
+                ClickButtonNumber <= pen.PenButtons.Length && pen.PenButtons[ClickButtonNumber - 1];
             var result = gesture.Process(pen.Position, pen.Pressure > 0,
                 pen.PenButtons[ButtonNumber - 1], scaleX, scaleY,
-                SensitivityX, SensitivityY, ReverseX, ReverseY);
+                SensitivityX, SensitivityY, ReverseX, ReverseY, relative);
+
+            // The side button chooses the nib click instead of adding another
+            // button to the normal left click. Scroll takes precedence.
+            bool clickConfigured = mouse != null && ClickButtonNumber > 0 && ClickButtonNumber != ButtonNumber &&
+                ClickButtonNumber <= pen.PenButtons.Length;
+            bool wantsClick = clickConfigured && clickButton && contact && !result.SuppressTip;
+            if (!contact)
+                suppressClickUntilLift = false;
+            if (!wantsClick && clickDown != null)
+            {
+                ReleaseContactClick();
+                suppressClickUntilLift = contact;
+            }
+            if (wantsClick && clickDown == null)
+            {
+                clickDown = ClickType == "Middle" ? MouseButton.Middle : MouseButton.Right;
+                mouse!.MouseDown(clickDown.Value);
+            }
 
             pen.Position = result.Position;
-            if (result.SuppressTip)
+            if (result.SuppressTip || (clickConfigured && clickButton) || suppressClickUntilLift)
                 pen.Pressure = 0;
-            if (result.SuppressButton)
+            if (result.SuppressButton || clickConfigured)
             {
                 // Do not mutate arrays shared with the parser/debugger.
                 pen.PenButtons = (bool[])pen.PenButtons.Clone();
-                pen.PenButtons[ButtonNumber - 1] = false;
+                if (result.SuppressButton)
+                    pen.PenButtons[ButtonNumber - 1] = false;
+                if (clickConfigured)
+                    pen.PenButtons[ClickButtonNumber - 1] = false;
             }
 
             if (result.Horizontal != 0)
@@ -132,6 +180,13 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
         }
     }
 
+    private void ReleaseContactClick()
+    {
+        if (clickDown is { } button)
+            mouse?.MouseUp(button);
+        clickDown = null;
+    }
+
     private static double ValidateSensitivity(double value) =>
         double.IsFinite(value) ? Math.Clamp(value, 0, 1000) : 10;
 
@@ -140,8 +195,11 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
         lock (sync)
         {
             // OTD disposes the output pipeline on disconnect and settings apply.
+            ReleaseContactClick();
+            if (mouse is ISynchronousPointer synchronous)
+                synchronous.Flush();
             disposed = true;
-            gesture.Reset();
+            gesture.Reset(relative);
             scroll = null;
         }
     }

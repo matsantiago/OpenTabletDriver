@@ -9,6 +9,80 @@ using OpenTabletDriver.Plugin.Tablet;
 
 var tests = new (string, Action)[]
 {
+    ("Relative: scroll anchors, lifting repositions, release does not jump", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Send(10000, 10000);
+        h.Send(10200, 10000);
+        Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f);
+        h.Send(10200, 10000, true, true);
+        h.Send(10000, 9800, true, true);
+        Check(h.Pointer.Scroll == new Vector2(10, 10));
+        h.Send(30000, 18000, false, true);
+        h.Send(30000, 18000, true, true);
+        h.Send(29800, 17800, true, true);
+        Check(h.Pointer.Scroll == new Vector2(20, 20));
+        Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f);
+        h.Send(31000, 19000, true, false);
+        Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f && !h.Pointer.Left);
+        h.Send(31200, 19000);
+        Check(Vector2.Distance(h.Pointer.Position, new(80, 0)) < 0.001f);
+        h.Send(31200, 19000, true);
+        Check(h.Pointer.Left);
+    }),
+    ("Relative: proximity return rebases and repeated scroll does not drift", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Send(10000, 10000);
+        h.Send(10200, 10000);
+        for (int i = 0; i < 5; i++)
+        {
+            h.Send(20000, 10000, true, true);
+            h.Send(18000, 10000, true, true);
+            h.Send(30000, 10000);
+            Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f);
+        }
+        h.Mode.Read(new OutOfRangeReport([]));
+        h.Send(5000, 5000);
+        Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f);
+        h.Send(5200, 5000);
+        Check(Vector2.Distance(h.Pointer.Position, new(80, 0)) < 0.001f);
+    }),
+    ("Contact click: hover does not click; touch replaces left; release waits for lift", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Filter.ClickButtonNumber = 2;
+        h.Send(10000, 10000, right: true);
+        Check(!h.Pointer.Right && !h.Pointer.Left);
+        h.Send(10000, 10000, true, right: true);
+        Check(h.Pointer.Right && !h.Pointer.Left);
+        h.Send(10200, 10000, true, right: true);
+        Check(h.Pointer.Right && !h.Pointer.Left);
+        h.Send(10200, 10000, true);
+        Check(!h.Pointer.Right && !h.Pointer.Left);
+        h.Send(10200, 10000);
+        h.Send(10200, 10000, true);
+        Check(h.Pointer.Left);
+    }),
+    ("Contact click: middle option, scroll priority, range loss and disposal release", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Filter.ClickButtonNumber = 2;
+        h.Filter.ClickType = "Middle";
+        h.Send(10000, 10000, true, right: true);
+        Check(h.Pointer.Events.Contains("down:Middle") && !h.Pointer.Left);
+        h.Send(9800, 10000, true, true, true);
+        Check(h.Pointer.Events.Contains("up:Middle") && !h.Pointer.Left);
+        h.Send(9600, 10000, true, true, true);
+        Check(h.Pointer.Scroll.X == 10);
+        h.Send(9600, 10000);
+        h.Send(9600, 10000, true, right: true);
+        h.Mode.Read(new OutOfRangeReport([]));
+        Check(h.Pointer.Events.Count(e => e == "up:Middle") == 2);
+        h.Send(5000, 5000, true, right: true);
+        h.Filter.Dispose();
+        Check(h.Pointer.Events.Count(e => e == "up:Middle") == 3);
+    }),
     ("Up/left motion scrolls down/right; pointer stays anchored", () =>
     {
         using var h = new Harness();
@@ -186,17 +260,18 @@ static void Check(bool result, [System.Runtime.CompilerServices.CallerArgumentEx
 sealed class Harness : IDisposable
 {
     public FakePointer Pointer { get; } = new();
-    public FakeMode Mode { get; } = new();
+    public OutputMode Mode { get; }
     public PenPanScrollFilter Filter { get; } = new();
     public BindingHandler Bindings { get; }
 
-    public Harness()
+    public Harness(bool relative = false)
     {
         var tablet = new TabletReference
         {
             Properties = new TabletConfiguration
             {
                 Name = "Wacom PTK-470",
+                DigitizerIdentifiers = [],
                 Specifications = new TabletSpecifications
                 {
                     Digitizer = new DigitizerSpecifications { Width = 187, Height = 105, MaxX = 37400, MaxY = 21000 },
@@ -204,15 +279,21 @@ sealed class Harness : IDisposable
                 }
             }
         };
-        Mode.Pointer = Pointer;
-        Mode.Tablet = tablet;
-        Mode.Input = new Area { Width = 187, Height = 105, Position = new(93.5f, 52.5f) };
-        Mode.Output = new Area { Width = 1870, Height = 1050, Position = new(935, 525) };
+        Pointer.Relative = relative;
+        if (relative)
+            Mode = new FakeRelativeMode { Pointer = Pointer, Tablet = tablet, Sensitivity = new(40, 40), ResetTime = TimeSpan.FromMinutes(1) };
+        else
+            Mode = new FakeMode
+            {
+                Pointer = Pointer, Tablet = tablet,
+                Input = new Area(187, 105, new(93.5f, 52.5f), 0),
+                Output = new Area(1870, 1050, new(935, 525), 0)
+            };
         Filter.Configure(tablet, Mode);
         Bindings = new(tablet)
         {
-            Tip = new ThresholdBindingState { ActivationThreshold = 1, Binding = new AdaptiveBinding(PenAction.Tip) { MouseButtonHandler = Pointer } },
-            Eraser = new ThresholdBindingState { ActivationThreshold = 1, Binding = new AdaptiveBinding(PenAction.Eraser) { MouseButtonHandler = Pointer } }
+            Tip = new ThresholdBindingState { Binding = new AdaptiveBinding(PenAction.Tip) { MouseButtonHandler = Pointer } },
+            Eraser = new ThresholdBindingState { Binding = new AdaptiveBinding(PenAction.Eraser) { MouseButtonHandler = Pointer } }
         };
         Bindings.PenButtons[0] = new BindingState { Binding = new AdaptiveBinding(PenAction.BarrelButton1) { MouseButtonHandler = Pointer } };
         Bindings.PenButtons[1] = new BindingState { Binding = new AdaptiveBinding(PenAction.BarrelButton1) { MouseButtonHandler = Pointer } };
@@ -228,17 +309,23 @@ sealed class Harness : IDisposable
 
 sealed class FakeMode : AbsoluteOutputMode
 {
-    public override IAbsolutePointer Pointer { get; set; } = null!;
+    public override IAbsolutePointer? Pointer { get; set; } = null!;
 }
 
-sealed class FakePointer : IAbsolutePointer, IMouseScrollHandler, IMouseButtonHandler, IPressureHandler, ISynchronousPointer
+sealed class FakeRelativeMode : RelativeOutputMode
+{
+    public override IRelativePointer? Pointer { get; set; } = null!;
+}
+
+sealed class FakePointer : IRelativePointer, IAbsolutePointer, IMouseScrollHandler, IMouseButtonHandler, IPressureHandler, ISynchronousPointer
 {
     public Vector2 Position, Scroll;
+    public bool Relative;
     public float Pressure;
     public bool Left, Right;
     public int ScrollCalls;
     public List<string> Events { get; } = [];
-    public void SetPosition(Vector2 position) => Position = position;
+    public void SetPosition(Vector2 position) => Position = Relative ? Position + position : position;
     public void ScrollHorizontally(int amount) { Scroll.X += amount; ScrollCalls++; }
     public void ScrollVertically(int amount) { Scroll.Y += amount; ScrollCalls++; }
     public void MouseDown(MouseButton button)

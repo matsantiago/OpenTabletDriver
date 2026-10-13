@@ -1,10 +1,10 @@
 {
   "Name": "Pen Pan/Scroll",
-  "Owner": "Oliver Iborra-MacDonald",
-  "Description": "Wacom-style pen button pan/scroll for macOS. Hold a pen button, touch the nib, and drag to scroll; the pointer stays put while the screen moves. Built for OpenTabletDriver 0.6.7.",
-  "PluginVersion": "1.0.0.0",
+  "Owner": "Matheus Santiago (fork of Oliver Iborra-MacDonald)",
+  "Description": "Pen-button contact scrolling in Absolute and Relative Mode on macOS, with optional right/middle contact-click substitution. Targets the native .NET 10 OTD build.",
+  "PluginVersion": "1.1.0.0",
   "SupportedDriverVersion": "0.6.7.0",
-  "RepositoryUrl": "https://github.com/djoliverm/otd-penpanscroll",
-  "WikiUrl": "https://github.com/djoliverm/otd-penpanscroll/blob/main/README.md",
+  "RepositoryUrl": "https://github.com/matsantiago/otd-penpanscroll",
+  "WikiUrl": "https://github.com/matsantiago/otd-penpanscroll/blob/main/README.md",
   "LicenseIdentifier": "MIT"
 }

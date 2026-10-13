@@ -13,26 +13,37 @@ internal sealed class Gesture
     private Vector2? previousContact;
     private Vector2? lastPointer;
     private double remainderX, remainderY;
+    private Vector2 relativeOffset;
+    private bool rebase;
 
     public GestureResult Process(Vector2 raw, bool contact, bool button,
         double unitsToMmX, double unitsToMmY, double sensitivityX, double sensitivityY,
-        bool reverseX, bool reverseY)
+        bool reverseX, bool reverseY, bool relative = false)
     {
+        if (relative && rebase)
+        {
+            relativeOffset = (lastPointer ?? raw) - raw;
+            rebase = false;
+        }
         if (!button)
         {
             if (held && contact)
                 suppressUntilLift = true;
             if (!contact)
                 suppressUntilLift = false;
+            // Rebase the virtual input at release, so RelativeOutputMode sees
+            // no accumulated motion from the entire scrolling stroke.
+            if (relative && held)
+                relativeOffset = anchor - raw;
             held = false;
             ClearStroke();
-            lastPointer = raw;
-            return new(raw, suppressUntilLift, false, 0, 0);
+            lastPointer = relative ? raw + relativeOffset : raw;
+            return new(lastPointer.Value, suppressUntilLift, false, 0, 0);
         }
 
         if (!held)
         {
-            anchor = lastPointer ?? raw;
+            anchor = lastPointer ?? (relative ? raw + relativeOffset : raw);
             ClearStroke();
             held = true;
         }
@@ -77,10 +88,17 @@ internal sealed class Gesture
         remainderX = remainderY = 0;
     }
 
-    public void Reset()
+    public void Reset(bool relative = false)
     {
         held = suppressUntilLift = false;
-        lastPointer = null;
+        if (relative)
+            rebase = true;
+        else
+        {
+            lastPointer = null;
+            relativeOffset = Vector2.Zero;
+            rebase = false;
+        }
         ClearStroke();
     }
 }
