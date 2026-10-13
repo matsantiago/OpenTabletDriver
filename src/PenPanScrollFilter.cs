@@ -17,7 +17,7 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
     private readonly MissionGesture missionGesture = new();
     internal Func<KeyboardModifiers> ReadModifiers { get; set; } = MacMissionControl.ReadModifiers;
     private int keyboardGesture;
-    internal Action<int, int> SendKeyboardScroll { get; set; } = MacMissionControl.SendScroll;
+    internal Action<int, int, bool> SendKeyboardScroll { get; set; } = MacMissionControl.SendScroll;
     internal Action<MissionAction> SendMissionAction { get; set; } = MacMissionControl.Send;
     private double missionThreshold = 5;
     private IMouseScrollHandler? scroll;
@@ -73,6 +73,10 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
     [Property("Control + Option middle click"), DefaultPropertyValue(false),
      ToolTip("Control + Option + nib contact holds the middle mouse button. Lift to release. Overrides scroll and Mission gestures.")]
     public bool MiddleClickGesture { get; set; }
+
+    [Property("Control + Command zoom"), DefaultPropertyValue(false),
+     ToolTip("Control + Command + nib drag sends vertical scroll with Command for app zoom (e.g. FigJam on Mac).")]
+    public bool ZoomGesture { get; set; }
 
     [Property("Mission gesture distance"), DefaultPropertyValue(5.0), Unit("mm")]
     public double MissionThreshold
@@ -164,13 +168,15 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
             var modifiers = ReadModifiers();
             bool wantsMiddle = MiddleClickGesture && modifiers.Control && modifiers.Option;
             bool wantsMission = MissionGestures && modifiers.Control && modifiers.Shift && !wantsMiddle;
-            bool wantsScroll = ScrollTrigger == "Control" && modifiers.Control && !modifiers.Shift && !wantsMiddle;
+            bool wantsZoom = ZoomGesture && modifiers.Control && modifiers.Command && !modifiers.Shift && !wantsMiddle;
+            bool wantsScroll = ScrollTrigger == "Control" && modifiers.Control && !modifiers.Shift && !wantsMiddle && !wantsZoom;
             if (!contact) keyboardGesture = 0;
             else if (keyboardGesture == 0)
-                keyboardGesture = wantsMiddle ? 3 : wantsMission ? 2 : wantsScroll ? 1 : 0;
+                keyboardGesture = wantsMiddle ? 3 : wantsMission ? 2 : wantsZoom ? 4 : wantsScroll ? 1 : 0;
             // A contact stroke belongs to exactly one mode. Releasing or adding
             // Shift mid-stroke never fires the other mode; lift to switch.
             bool keyboardScroll = wantsScroll && (!contact || keyboardGesture == 1);
+            bool zoom = wantsZoom && (!contact || keyboardGesture == 4);
             bool mission = wantsMission && (!contact || keyboardGesture == 2);
             bool middle = wantsMiddle && (!contact || keyboardGesture == 3);
             bool penScroll = !middle && ScrollTrigger == "Pen button" && pen.PenButtons[ButtonNumber - 1];
@@ -179,7 +185,7 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
             bool clickButton = ClickButtonNumber > 0 && (ScrollTrigger != "Pen button" || ClickButtonNumber != ButtonNumber) &&
                 ClickButtonNumber <= pen.PenButtons.Length && pen.PenButtons[ClickButtonNumber - 1];
             var result = gesture.Process(pen.Position, pen.Pressure > 0,
-                mission || keyboardScroll || penScroll, scaleX, scaleY,
+                mission || keyboardScroll || zoom || penScroll, scaleX, scaleY,
                 mission ? 0 : SensitivityX, mission ? 0 : SensitivityY, ReverseX, ReverseY, relative);
 
             // The side button chooses the nib click instead of adding another
@@ -209,7 +215,7 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
             {
                 // Do not mutate arrays shared with the parser/debugger.
                 pen.PenButtons = (bool[])pen.PenButtons.Clone();
-                if (middle || keyboardScroll || mission)
+                if (middle || keyboardScroll || zoom || mission)
                     Array.Fill(pen.PenButtons, false);
                 else if (result.SuppressButton && ScrollTrigger == "Pen button")
                     pen.PenButtons[ButtonNumber - 1] = false;
@@ -217,16 +223,18 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
                     pen.PenButtons[ClickButtonNumber - 1] = false;
             }
 
-            if (!keyboardScroll && result.Horizontal != 0)
+            if (!keyboardScroll && !zoom && result.Horizontal != 0)
                 scroll.ScrollHorizontally(result.Horizontal);
-            if (!keyboardScroll && result.Vertical != 0)
+            if (!keyboardScroll && !zoom && result.Vertical != 0)
                 scroll.ScrollVertically(result.Vertical);
 
             // The normal output stage releases the nib, positions the pointer,
             // and flushes both scroll axes together in its usual report cycle.
             Emit?.Invoke(report);
             if (keyboardScroll)
-                SendKeyboardScroll(result.Horizontal, result.Vertical);
+                SendKeyboardScroll(result.Horizontal, result.Vertical, false);
+            else if (zoom)
+                SendKeyboardScroll(0, result.Vertical, true);
             // First flush the report with the nib released, then post the
             // shortcut. This prevents Control-click from opening a menu.
             if (missionAction is { } action)

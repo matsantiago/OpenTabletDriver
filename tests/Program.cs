@@ -9,6 +9,48 @@ using OpenTabletDriver.Plugin.Tablet;
 
 var tests = new (string, Action)[]
 {
+    ("Zoom sends vertical Command-scroll, normal scroll has no modifiers", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Filter.ScrollTrigger = "Control";
+        h.Filter.ZoomGesture = h.Filter.MissionGestures = true;
+        bool command = true;
+        h.Filter.ReadModifiers = () => new(true, false, false, command);
+        var events = new List<(int X, int Y, bool Zoom)>();
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { if (x != 0 || y != 0) events.Add((x, y, zoom)); };
+        h.Filter.SendMissionAction = _ => throw new Exception("Unexpected Mission");
+        h.Send(10000, 10000);
+        h.Send(10000, 10000, true);
+        h.Send(9800, 9800, true);
+        Check(events.SequenceEqual(new[] { (0, 10, true) }));
+        Check(h.Pointer.Position == Vector2.Zero && !h.Pointer.Left);
+        command = false;
+        h.Send(9600, 9600, true);
+        Check(events.Count == 1 && !h.Pointer.Left);
+        h.Send(9600, 9600);
+        h.Send(9600, 9600, true);
+        h.Send(9400, 9400, true);
+        Check(events.Last() == (10, 10, false));
+        Check(MacMissionControl.ScrollFlags(true) == 1UL << 20 && MacMissionControl.ScrollFlags(false) == 0);
+    }),
+    ("Adding Command mid-scroll does not switch to zoom before lift", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Filter.ScrollTrigger = "Control";
+        h.Filter.ZoomGesture = true;
+        bool command = false;
+        h.Filter.ReadModifiers = () => new(true, false, false, command);
+        int zoomEvents = 0;
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { if (zoom && y != 0) zoomEvents++; };
+        h.Send(10000, 10000, true);
+        command = true;
+        h.Send(10000, 9000, true);
+        Check(zoomEvents == 0);
+        h.Send(10000, 9000);
+        h.Send(10000, 9000, true);
+        h.Send(10000, 8800, true);
+        Check(zoomEvents == 1);
+    }),
     ("Control Option middle: touch only, movement preserved, no scroll or Mission, release on lift", () =>
     {
         using var h = new Harness(relative: true);
@@ -16,7 +58,7 @@ var tests = new (string, Action)[]
         h.Filter.MissionGestures = h.Filter.MiddleClickGesture = true;
         h.Filter.ReadModifiers = () => new(true, false, true);
         h.Filter.SendMissionAction = _ => throw new Exception("Unexpected Mission");
-        h.Filter.SendKeyboardScroll = (x, y) => { Check(x == 0 && y == 0); };
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { Check(x == 0 && y == 0); };
         h.Send(10000, 10000);
         Check(!h.Pointer.Events.Contains("down:Middle"));
         h.Send(10000, 10000, true);
@@ -34,7 +76,7 @@ var tests = new (string, Action)[]
         h.Filter.ScrollTrigger = "Control";
         h.Filter.MiddleClickGesture = true;
         h.Filter.ReadModifiers = () => new(true, false, option);
-        h.Filter.SendKeyboardScroll = (x, y) => { Check(x == 0 && y == 0); };
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { Check(x == 0 && y == 0); };
         h.Send(10000, 10000, true);
         option = false;
         h.Send(10200, 10000, true);
@@ -61,7 +103,7 @@ var tests = new (string, Action)[]
         var actions = new List<MissionAction>();
         h.Filter.SendMissionAction = actions.Add;
         int scrolls = 0;
-        h.Filter.SendKeyboardScroll = (x, y) => { if (x != 0 || y != 0) scrolls++; };
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { if (x != 0 || y != 0) scrolls++; };
         h.Send(10000, 10000, true);
         h.Send(10000, 9000, true);
         Check(actions.SequenceEqual(new[] { MissionAction.Overview }) && scrolls == 0);
@@ -83,7 +125,7 @@ var tests = new (string, Action)[]
         h.Filter.MissionGestures = true;
         h.Filter.ReadModifiers = () => new(true, shift);
         h.Filter.SendMissionAction = actions.Add;
-        h.Filter.SendKeyboardScroll = (x, y) => { h.Pointer.ScrollHorizontally(x); h.Pointer.ScrollVertically(y); };
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { h.Pointer.ScrollHorizontally(x); h.Pointer.ScrollVertically(y); };
         h.Send(10000, 10000);
         h.Send(10000, 10000, true);
         h.Send(9000, 9000, true);
@@ -108,7 +150,7 @@ var tests = new (string, Action)[]
         Check(h.Pointer.Scroll == Vector2.Zero);
         h.Filter.ReadModifiers = () => new(true, false);
         int scrolls = 0;
-        h.Filter.SendKeyboardScroll = (x, y) => { if (x != 0 || y != 0) scrolls++; };
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { if (x != 0 || y != 0) scrolls++; };
         h.Send(9800, 9800);
         h.Send(5000, 5000);
         Check(scrolls == 0 && !h.Pointer.Left && !h.Pointer.Right);

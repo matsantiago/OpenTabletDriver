@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace PenPanScroll;
 
-internal readonly record struct KeyboardModifiers(bool Control, bool Shift, bool Option = false);
+internal readonly record struct KeyboardModifiers(bool Control, bool Shift, bool Option = false, bool Command = false);
 
 internal enum MissionAction { Overview, Dismiss, SpaceLeft, SpaceRight }
 
@@ -48,7 +48,8 @@ internal static class MacMissionControl
         // deliberately clear modifier flags and must not affect this decision.
         return new(CGEventSourceKeyState(1, 59) || CGEventSourceKeyState(1, 62),
             CGEventSourceKeyState(1, 56) || CGEventSourceKeyState(1, 60),
-            CGEventSourceKeyState(1, 58) || CGEventSourceKeyState(1, 61));
+            CGEventSourceKeyState(1, 58) || CGEventSourceKeyState(1, 61),
+            CGEventSourceKeyState(1, 55) || CGEventSourceKeyState(1, 54));
     }
 
     internal static void Send(MissionAction action)
@@ -67,19 +68,21 @@ internal static class MacMissionControl
         }
     }
 
-    internal static void SendScroll(int horizontal, int vertical)
+    internal static void SendScroll(int horizontal, int vertical, bool zoom)
     {
         if (!OperatingSystem.IsMacOS() || (horizontal == 0 && vertical == 0)) return;
         var ev = CGEventCreateScrollWheelEvent2(IntPtr.Zero, 0, 2, -vertical, -horizontal, 0);
         if (ev == IntPtr.Zero) return;
         try
         {
-            // The modifier chord selects our gesture, not app zoom/Shift-scroll.
-            CGEventSetFlags(ev, 0);
+            // Keep Command only for explicit zoom; strip the gesture selectors.
+            CGEventSetFlags(ev, ScrollFlags(zoom));
             CGEventPost(0, ev);
         }
         finally { CFRelease(ev); }
     }
+
+    internal static ulong ScrollFlags(bool zoom) => zoom ? 1UL << 20 : 0;
 
     [DllImport(CoreGraphics)] private static extern IntPtr CGEventCreateScrollWheelEvent2(IntPtr source, int unit, uint axes, int vertical, int horizontal, int third);
     [DllImport(CoreGraphics)] [return: MarshalAs(UnmanagedType.I1)] private static extern bool CGEventSourceKeyState(int state, ushort key);
