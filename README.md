@@ -10,6 +10,21 @@ In Relative Mode, the filter keeps a virtual coordinate offset. Releasing the sc
 
 Optional contact clicks: set **Contact click button** to a different pen button and choose **Right** or **Middle**. Holding that side button alone never clicks. Touching the nib replaces the left click with the chosen click; lifting releases it. Releasing the side button while touching releases the click and suppresses left click until the nib lifts. Scroll has priority if both buttons are held. Zero disables contact-click substitution.
 
+## Relative Pointer Acceleration
+
+Enable the separate **Relative Pointer Acceleration** filter in the same plugin package. It runs after OTD transforms relative motion and scales only pointer deltas; pen scrolling and Mission Control gestures retain their own sensitivity/distance. Absolute Mode is passed through.
+
+| Control | Default | Meaning |
+|---|---|---|
+| Acceleration starts at | 20 mm/s | Below this physical speed, retain base Relative Mode sensitivity |
+| Maximum gain at | 150 mm/s | Speed at which the velocity curve reaches maximum gain |
+| Maximum gain | 2× | Upper sensitivity multiplier; 1 disables acceleration |
+| Speed smoothing | 20 ms | Smooth speed estimate without buffering pointer samples; 0 is instantaneous |
+| Travel before acceleration | 3 mm | Require net travel beyond this distance; ramp distance gain from 3 to 6 mm; 0 uses velocity alone |
+| Motion window | 100 ms | Recent displacement window; back-and-forth movement cancels rather than adding path length |
+
+Both speed and distance gates must engage to produce acceleration. Short fast writing strokes stay at base sensitivity when net travel stays below 3 mm. Larger writing strokes can still accelerate; increase Travel before acceleration to suit your handwriting. Lift/proximity loss and long report gaps reset the speed estimate. Base sensitivity remains configured in Relative Mode.
+
 ## Control + nib gestures
 
 Enable **Control Mission gestures** to replace Control-click with navigation:
@@ -18,7 +33,7 @@ Enable **Control Mission gestures** to replace Control-click with navigation:
 - Drag right: switch to the Space on the left (`Control-Left`).
 - Drag left: switch to the Space on the right (`Control-Right`).
 
-The cursor stays anchored, clicks and scroll are suppressed, and each contact stroke triggers at most one action after **Mission gesture distance** (default 5 mm). Lift and touch again for another action. Downward motion has no action. Releasing Control while touching suppresses the nib click until lift and resumes relative pointing without a jump.
+The cursor stays anchored, clicks and scroll are suppressed, and each contact stroke triggers at most one action after **Mission gesture distance** (default 5 mm). Lift and touch again for another action. Drag down to dismiss Mission Control with Escape. Releasing Control while touching suppresses the nib click until lift and resumes relative pointing without a jump.
 
 Uses macOS keyboard shortcuts, which must be enabled under System Settings > Keyboard > Keyboard Shortcuts > Mission Control. This triggers the system transition after the distance threshold; it does not drive an interactive trackpad-style animation. Other pen-button gestures continue working without Control.
 
@@ -92,7 +107,7 @@ dotnet run --project tests -c Release -p:OtdDirectory=/path/to/OTD/assemblies
 
 For a self-contained single-file app, use the source build directory `OpenTabletDriver.Desktop/bin/Release/net10.0` containing the matching assemblies. Pass `-p:OtdDirectory=/absolute/path/to/OpenTabletDriver.app/Contents/MacOS`. The compiled plugin is `src/bin/Release/net10.0/PenPanScroll.dll`. For direct installation, package that DLL together with the root `metadata.json`; keep both files at the archive's top level.
 
-The 23 tests drive the real OTD report, binding, absolute-output, and relative-output classes with a recording pointer: direction, anchoring, fractional accumulation, lift/re-contact, both button-release orders, right-click preservation, proximity loss, disposal, and fail-open behavior. They do not substitute for physical tablet testing.
+The 28 tests drive the real OTD report, binding, absolute-output, and relative-output classes with a recording pointer: direction, anchoring, fractional accumulation, lift/re-contact, both button-release orders, right-click preservation, proximity loss, disposal, and fail-open behavior. They do not substitute for physical tablet testing.
 
 ## Releasing a new version
 

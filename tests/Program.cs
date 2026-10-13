@@ -9,6 +9,87 @@ using OpenTabletDriver.Plugin.Tablet;
 
 var tests = new (string, Action)[]
 {
+    ("Acceleration: short fast writing stays precise; long travel gains; window expires", () =>
+    {
+        var c = new AccelerationCurve();
+        c.Apply(Vector2.Zero, Vector2.Zero, 0, 20, 150, 2, 0, 1, 3, 0.1);
+        double time = 0;
+        for (int i = 0; i < 20; i++)
+        {
+            time += 0.002;
+            var mm = new Vector2(i % 2 == 0 ? 1 : -1, 0);
+            Check(c.Apply(mm, mm, time, 20, 150, 2, 0, 1, 3, 0.1) == mm);
+        }
+        for (int i = 0; i < 6; i++)
+        {
+            time += 0.002;
+            var result = c.Apply(new(1, 0), new(1, 0), time, 20, 150, 2, 0, 1, 3, 0.1);
+            if (i < 3) Check(result.X == 1);
+            if (i == 5) Check(result.X == 2);
+        }
+        time += 0.2;
+        Check(c.Apply(new(1, 0), new(1, 0), time, 20, 150, 2, 0, 1, 3, 0.1).X == 1);
+    }),
+    ("Acceleration: slow motion stays precise, fast motion caps gain, scroll unaffected", () =>
+    {
+        using var h = new Harness(relative: true);
+        double time = 0;
+        using var a = new PointerAccelerationFilter { Smoothing = 0, TravelDistance = 0, Clock = () => time };
+        a.Configure((RelativeOutputMode)h.Mode);
+        h.Mode.Elements = [h.Filter, a, h.Bindings];
+        h.Send(10000, 10000);
+        time += 0.02;
+        h.Send(10020, 10000);
+        Check(Vector2.Distance(h.Pointer.Position, new(4, 0)) < 0.001f);
+        time += 0.02;
+        h.Send(10820, 10000);
+        Check(Vector2.Distance(h.Pointer.Position, new(324, 0)) < 0.001f);
+        time += 0.02;
+        h.Send(10820, 10000, true, true);
+        time += 0.02;
+        h.Send(10620, 9800, true, true);
+        Check(h.Pointer.Scroll == new Vector2(10, 10));
+        Check(Vector2.Distance(h.Pointer.Position, new(324, 0)) < 0.001f);
+        time += 0.02;
+        h.Send(20000, 15000);
+        Check(Vector2.Distance(h.Pointer.Position, new(324, 0)) < 0.001f);
+    }),
+    ("Acceleration: rotational direction preserved, rest stays still, gaps reset speed", () =>
+    {
+        var c = new AccelerationCurve();
+        c.Apply(Vector2.Zero, Vector2.Zero, 0, 20, 150, 2, 0, 0.1);
+        var fast = c.Apply(new(3, 4), new(3, 4), 0.01, 20, 150, 2, 0, 0.1);
+        Check(fast == new Vector2(6, 8));
+        Check(c.Apply(Vector2.Zero, Vector2.Zero, 0.02, 20, 150, 2, 20, 0.1) == Vector2.Zero);
+        Check(c.Apply(new(3, 4), new(3, 4), 1, 20, 150, 2, 20, 0.1) == new Vector2(3, 4));
+        c.Reset();
+        Check(c.Apply(new(3, 4), new(3, 4), 2, 20, 150, 2, 20, 0.1) == new Vector2(3, 4));
+    }),
+    ("Acceleration: smoothing converges consistently at different report rates", () =>
+    {
+        foreach (int rate in new[] { 100, 200, 500 })
+        {
+            var c = new AccelerationCurve();
+            c.Apply(Vector2.Zero, Vector2.Zero, 0, 20, 150, 2, 20, 0.1);
+            Vector2 result = default;
+            for (int i = 1; i <= rate; i++)
+                result = c.Apply(new(1, 0), new(200f / rate, 0), i / (double)rate, 20, 150, 2, 20, 0.1);
+            Check(Math.Abs(result.X - 2) < 0.001);
+        }
+    }),
+    ("Acceleration: gain one disables, absolute mode fails open, controls validate", () =>
+    {
+        var c = new AccelerationCurve();
+        c.Apply(Vector2.Zero, Vector2.Zero, 0, 20, 150, 1, 0, 1);
+        Check(c.Apply(new(5, 0), new(5, 0), 0.01, 20, 150, 1, 0, 1) == new Vector2(5, 0));
+        using var h = new Harness();
+        using var a = new PointerAccelerationFilter { MaxGain = double.NaN, Smoothing = -1 };
+        a.Configure(null);
+        h.Mode.Elements = [h.Filter, a, h.Bindings];
+        h.Send(10000, 10000);
+        Check(Vector2.Distance(h.Pointer.Position, new(500, 500)) < 0.001f);
+        Check(a.MaxGain == 2 && a.Smoothing == 0);
+    }),
     ("Control gestures: threshold, inverse horizontal direction and one action per touch", () =>
     {
         using var h = new Harness(relative: true);
@@ -36,7 +117,7 @@ var tests = new (string, Action)[]
         h.Send(12200, 10000, true);
         Check(h.Pointer.Left);
     }),
-    ("Control gestures: up overview, hover/down ignored, normal scroll resumes", () =>
+    ("Control gestures: up/down overview actions, hover ignored, normal scroll resumes", () =>
     {
         using var h = new Harness(relative: true);
         bool ctrl = true;
@@ -49,11 +130,13 @@ var tests = new (string, Action)[]
         Check(actions.Count == 0);
         h.Send(10000, 10000, true);
         h.Send(10000, 11000, true);
-        Check(actions.Count == 0);
+        Check(actions.SequenceEqual(new[] { MissionAction.Dismiss }));
+        h.Send(10000, 10000);
+        h.Send(10000, 10000, true);
         h.Send(10000, 9000, true);
-        Check(actions.SequenceEqual(new[] { MissionAction.Overview }));
+        Check(actions.SequenceEqual(new[] { MissionAction.Dismiss, MissionAction.Overview }));
         h.Send(10000, 5000, true);
-        Check(actions.Count == 1);
+        Check(actions.Count == 2);
         h.Send(10000, 5000);
         ctrl = false;
         h.Send(10000, 5000, true, true);

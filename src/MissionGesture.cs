@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 
 namespace PenPanScroll;
 
-internal enum MissionAction { Overview, SpaceLeft, SpaceRight }
+internal enum MissionAction { Overview, Dismiss, SpaceLeft, SpaceRight }
 
 internal sealed class MissionGesture
 {
@@ -25,7 +25,8 @@ internal sealed class MissionGesture
         // Dominant axis prevents diagonal noise from selecting two actions.
         MissionAction? action = Math.Abs(x) > Math.Abs(y) && Math.Abs(x) >= threshold
             ? (x > 0 ? MissionAction.SpaceLeft : MissionAction.SpaceRight)
-            : y <= -threshold ? MissionAction.Overview : null;
+            : y <= -threshold ? MissionAction.Overview
+            : y >= threshold ? MissionAction.Dismiss : null;
         if (action != null) fired = true;
         return action;
     }
@@ -44,10 +45,10 @@ internal static class MacMissionControl
     internal static void Send(MissionAction action)
     {
         if (!OperatingSystem.IsMacOS()) return;
-        ushort key = action switch { MissionAction.Overview => 126, MissionAction.SpaceLeft => 123, _ => 124 };
+        ushort key = action switch { MissionAction.Dismiss => 53, MissionAction.Overview => 126, MissionAction.SpaceLeft => 123, _ => 124 };
         // Arrow keys carry the numeric-pad and secondary-Fn flags on macOS.
         // Do not synthesize Control up/down: the user is physically holding it.
-        const ulong flags = Control | (1UL << 21) | (1UL << 23);
+        ulong flags = action == MissionAction.Dismiss ? 0 : Control | (1UL << 21) | (1UL << 23);
         for (int i = 0; i < 2; i++)
         {
             var ev = CGEventCreateKeyboardEvent(IntPtr.Zero, key, i == 0);
