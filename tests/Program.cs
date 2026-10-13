@@ -9,15 +9,37 @@ using OpenTabletDriver.Plugin.Tablet;
 
 var tests = new (string, Action)[]
 {
-    ("Control+Shift scroll overrides Mission Control, release waits for lift", () =>
+    ("Mission chord never scrolls, even when Shift is released mid-contact", () =>
     {
         using var h = new Harness(relative: true);
         bool shift = true;
-        var actions = new List<MissionAction>();
-        h.Filter.ScrollTrigger = "Control + Shift";
+        h.Filter.ScrollTrigger = "Control";
         h.Filter.MissionGestures = true;
-        h.Filter.ControlPressed = () => true;
-        h.Filter.ControlShiftPressed = () => shift;
+        h.Filter.ReadModifiers = () => new(true, shift);
+        var actions = new List<MissionAction>();
+        h.Filter.SendMissionAction = actions.Add;
+        int scrolls = 0;
+        h.Filter.SendKeyboardScroll = (x, y) => { if (x != 0 || y != 0) scrolls++; };
+        h.Send(10000, 10000, true);
+        h.Send(10000, 9000, true);
+        Check(actions.SequenceEqual(new[] { MissionAction.Overview }) && scrolls == 0);
+        shift = false;
+        h.Send(10000, 8000, true);
+        h.Send(10000, 7000, true);
+        Check(scrolls == 0 && !h.Pointer.Left);
+        h.Send(10000, 7000);
+        h.Send(10000, 7000, true);
+        h.Send(10000, 6800, true);
+        Check(scrolls == 1 && actions.Count == 1);
+    }),
+    ("Control scroll and Control+Shift Mission Control stay exclusive per stroke", () =>
+    {
+        using var h = new Harness(relative: true);
+        bool shift = false;
+        var actions = new List<MissionAction>();
+        h.Filter.ScrollTrigger = "Control";
+        h.Filter.MissionGestures = true;
+        h.Filter.ReadModifiers = () => new(true, shift);
         h.Filter.SendMissionAction = actions.Add;
         h.Filter.SendKeyboardScroll = (x, y) => { h.Pointer.ScrollHorizontally(x); h.Pointer.ScrollVertically(y); };
         h.Send(10000, 10000);
@@ -25,7 +47,7 @@ var tests = new (string, Action)[]
         h.Send(9000, 9000, true);
         Check(h.Pointer.Scroll == new Vector2(50, 50));
         Check(actions.Count == 0 && !h.Pointer.Left && h.Pointer.Position == Vector2.Zero);
-        shift = false;
+        shift = true;
         h.Send(8000, 8000, true);
         h.Send(7000, 7000, true);
         Check(actions.Count == 0 && !h.Pointer.Left);
@@ -37,12 +59,12 @@ var tests = new (string, Action)[]
     ("Keyboard scroll: pen button alone no longer scrolls; hover never scrolls", () =>
     {
         using var h = new Harness(relative: true);
-        h.Filter.ScrollTrigger = "Control + Shift";
-        h.Filter.ControlShiftPressed = () => false;
+        h.Filter.ScrollTrigger = "Control";
+        h.Filter.ReadModifiers = () => new(false, false);
         h.Send(10000, 10000, true, true);
         h.Send(9800, 9800, true, true);
         Check(h.Pointer.Scroll == Vector2.Zero);
-        h.Filter.ControlShiftPressed = () => true;
+        h.Filter.ReadModifiers = () => new(true, false);
         int scrolls = 0;
         h.Filter.SendKeyboardScroll = (x, y) => { if (x != 0 || y != 0) scrolls++; };
         h.Send(9800, 9800);
@@ -136,7 +158,7 @@ var tests = new (string, Action)[]
         bool ctrl = true;
         var actions = new List<MissionAction>();
         h.Filter.MissionGestures = true;
-        h.Filter.ControlPressed = () => ctrl;
+        h.Filter.ReadModifiers = () => new(ctrl, true);
         h.Filter.SendMissionAction = actions.Add;
         h.Send(10000, 10000, true);
         h.Send(10900, 10000, true);
@@ -163,7 +185,7 @@ var tests = new (string, Action)[]
         bool ctrl = true;
         var actions = new List<MissionAction>();
         h.Filter.MissionGestures = true;
-        h.Filter.ControlPressed = () => ctrl;
+        h.Filter.ReadModifiers = () => new(ctrl, true);
         h.Filter.SendMissionAction = actions.Add;
         h.Send(10000, 10000);
         h.Send(10000, 5000);
@@ -187,7 +209,7 @@ var tests = new (string, Action)[]
     {
         using var h = new Harness(relative: true);
         var actions = new List<MissionAction>();
-        h.Filter.ControlPressed = () => true;
+        h.Filter.ReadModifiers = () => new(true, true);
         h.Filter.SendMissionAction = actions.Add;
         h.Send(10000, 10000, true);
         Check(h.Pointer.Left && actions.Count == 0);
@@ -452,7 +474,7 @@ sealed class Harness : IDisposable
 {
     public FakePointer Pointer { get; } = new();
     public OutputMode Mode { get; }
-    public PenPanScrollFilter Filter { get; } = new();
+    public PenPanScrollFilter Filter { get; } = new() { ReadModifiers = () => default };
     public BindingHandler Bindings { get; }
 
     public Harness(bool relative = false)

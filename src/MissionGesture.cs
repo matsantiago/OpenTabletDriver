@@ -3,6 +3,8 @@ using System.Runtime.InteropServices;
 
 namespace PenPanScroll;
 
+internal readonly record struct KeyboardModifiers(bool Control, bool Shift);
+
 internal enum MissionAction { Overview, Dismiss, SpaceLeft, SpaceRight }
 
 internal sealed class MissionGesture
@@ -39,11 +41,14 @@ internal static class MacMissionControl
     private const string CoreGraphics = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
     private const ulong Control = 1UL << 18;
 
-    internal static bool IsControlPressed() => OperatingSystem.IsMacOS() &&
-        (CGEventSourceFlagsState(0) & Control) != 0;
-
-    internal static bool IsControlShiftPressed() => OperatingSystem.IsMacOS() &&
-        (CGEventSourceFlagsState(0) & (Control | (1UL << 17))) == (Control | (1UL << 17));
+    internal static KeyboardModifiers ReadModifiers()
+    {
+        if (!OperatingSystem.IsMacOS()) return default;
+        // Read physical HID key state. Our synthetic scroll/shortcut events
+        // deliberately clear modifier flags and must not affect this decision.
+        return new(CGEventSourceKeyState(1, 59) || CGEventSourceKeyState(1, 62),
+            CGEventSourceKeyState(1, 56) || CGEventSourceKeyState(1, 60));
+    }
 
     internal static void Send(MissionAction action)
     {
@@ -76,7 +81,7 @@ internal static class MacMissionControl
     }
 
     [DllImport(CoreGraphics)] private static extern IntPtr CGEventCreateScrollWheelEvent2(IntPtr source, int unit, uint axes, int vertical, int horizontal, int third);
-    [DllImport(CoreGraphics)] private static extern ulong CGEventSourceFlagsState(int state);
+    [DllImport(CoreGraphics)] [return: MarshalAs(UnmanagedType.I1)] private static extern bool CGEventSourceKeyState(int state, ushort key);
     [DllImport(CoreGraphics)] private static extern IntPtr CGEventCreateKeyboardEvent(IntPtr source, ushort key, [MarshalAs(UnmanagedType.I1)] bool down);
     [DllImport(CoreGraphics)] private static extern void CGEventSetFlags(IntPtr ev, ulong flags);
     [DllImport(CoreGraphics)] private static extern void CGEventPost(int location, IntPtr ev);

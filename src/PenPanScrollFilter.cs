@@ -15,10 +15,9 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
     private readonly object sync = new();
     private readonly Gesture gesture = new();
     private readonly MissionGesture missionGesture = new();
-    internal Func<bool> ControlShiftPressed { get; set; } = MacMissionControl.IsControlShiftPressed;
-    private bool missionBlockedUntilLift;
+    internal Func<KeyboardModifiers> ReadModifiers { get; set; } = MacMissionControl.ReadModifiers;
+    private int keyboardGesture;
     internal Action<int, int> SendKeyboardScroll { get; set; } = MacMissionControl.SendScroll;
-    internal Func<bool> ControlPressed { get; set; } = MacMissionControl.IsControlPressed;
     internal Action<MissionAction> SendMissionAction { get; set; } = MacMissionControl.Send;
     private double missionThreshold = 5;
     private IMouseScrollHandler? scroll;
@@ -40,7 +39,7 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
 
     [Property("Scroll trigger"), DefaultPropertyValue("Pen button"), PropertyValidated(nameof(ScrollTriggers))]
     public string ScrollTrigger { get; set; } = "Pen button";
-    public static string[] ScrollTriggers => ["Pen button", "Control + Shift"];
+    public static string[] ScrollTriggers => ["Pen button", "Control"];
 
     [Property("Scroll button"), DefaultPropertyValue(1),
      ToolTip("One-based pen button number shown by the tablet debugger. This button is consumed while the filter is enabled.")]
@@ -67,8 +66,8 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
     public string ClickType { get; set; } = "Right";
     public static string[] ClickTypes => ["Right", "Middle"];
 
-    [Property("Control Mission gestures"), DefaultPropertyValue(false),
-     ToolTip("Control + nib drag: up opens Mission Control, right moves to the left Space, left to the right Space. One action per stroke.")]
+    [Property("Control + Shift Mission gestures"), DefaultPropertyValue(false),
+     ToolTip("Control + Shift + nib drag: up opens Mission Control, right moves to the left Space, left to the right Space. One action per stroke.")]
     public bool MissionGestures { get; set; }
 
     [Property("Mission gesture distance"), DefaultPropertyValue(5.0), Unit("mm")]
@@ -133,7 +132,7 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
                 suppressClickUntilLift = false;
                 gesture.Reset(relative);
                 missionGesture.Reset();
-                missionBlockedUntilLift = false;
+                keyboardGesture = 0;
                 Emit?.Invoke(report);
                 return;
             }
@@ -152,16 +151,22 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
                 suppressClickUntilLift = false;
                 gesture.Reset(relative);
                 missionGesture.Reset();
-                missionBlockedUntilLift = false;
+                keyboardGesture = 0;
                 Emit?.Invoke(report);
                 return;
             }
 
             bool contact = pen.Pressure > 0;
-            bool keyboardScroll = ScrollTrigger == "Control + Shift" && ControlShiftPressed();
-            if (!contact) missionBlockedUntilLift = false;
-            if (keyboardScroll && contact) missionBlockedUntilLift = true;
-            bool mission = MissionGestures && ControlPressed() && !keyboardScroll && !missionBlockedUntilLift;
+            var modifiers = ReadModifiers();
+            bool wantsMission = MissionGestures && modifiers.Control && modifiers.Shift;
+            bool wantsScroll = ScrollTrigger == "Control" && modifiers.Control && !modifiers.Shift;
+            if (!contact) keyboardGesture = 0;
+            else if (keyboardGesture == 0)
+                keyboardGesture = wantsMission ? 2 : wantsScroll ? 1 : 0;
+            // A contact stroke belongs to exactly one mode. Releasing or adding
+            // Shift mid-stroke never fires the other mode; lift to switch.
+            bool keyboardScroll = wantsScroll && (!contact || keyboardGesture == 1);
+            bool mission = wantsMission && (!contact || keyboardGesture == 2);
             bool penScroll = ScrollTrigger == "Pen button" && pen.PenButtons[ButtonNumber - 1];
             var missionAction = missionGesture.Process(pen.Position, contact, mission,
                 scaleX, scaleY, MissionThreshold);
@@ -245,7 +250,7 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
             disposed = true;
             gesture.Reset(relative);
             missionGesture.Reset();
-                missionBlockedUntilLift = false;
+                keyboardGesture = 0;
             scroll = null;
         }
     }

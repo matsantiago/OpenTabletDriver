@@ -10,11 +10,11 @@ In Relative Mode, the filter keeps a virtual coordinate offset. Releasing the sc
 
 Optional contact clicks: set **Contact click button** to a different pen button and choose **Right** or **Middle**. Holding that side button alone never clicks. Touching the nib replaces the left click with the chosen click; lifting releases it. Releasing the side button while touching releases the click and suppresses left click until the nib lifts. Scroll has priority if both buttons are held. Zero disables contact-click substitution.
 
-## Control + Shift scrolling
+## Keyboard gesture mapping
 
-Set **Scroll trigger** to **Control + Shift** to use the keyboard chord instead of a pen button. Hold both keys, touch and drag to scroll vertically/horizontally with the pointer anchored. Hover produces no scroll. This chord takes priority over Control Mission gestures. Releasing Shift while the nib is down does not start a Mission gesture; lift before starting another gesture.
+Set **Scroll trigger** to **Control**: Control + nib drag scrolls with the cursor anchored. Enable **Control + Shift Mission gestures**: Control + Shift + nib drag opens/dismisses Mission Control or switches Spaces. The two chords are mutually exclusive. Hover never scrolls. Lift the nib before switching modes; changing Shift while touching cannot fire the other action.
 
-Keyboard-triggered scroll posts pixel scroll events with modifier flags cleared, so applications do not interpret Control as zoom or Shift as an axis switch. The original **Pen button** trigger remains available. Switching triggers does not change side-button bindings.
+Reads left/right modifier keys from the physical HID key state instead of flags on synthetic events. Keyboard-triggered scroll posts pixel scroll events with modifier flags cleared, avoiding application zoom or Shift axis switching. The original **Pen button** trigger remains available.
 
 ## Relative Pointer Acceleration
 
@@ -33,15 +33,15 @@ Both speed and distance gates must engage to produce acceleration. Short fast wr
 
 ## Control + nib gestures
 
-Enable **Control Mission gestures** to replace Control-click with navigation:
+Enable **Control + Shift Mission gestures** to replace Control-click with navigation:
 
-- Hold Control, touch and drag up: Mission Control (`Control-Up`).
+- Hold Control + Shift, touch and drag up: Mission Control (`Control-Up`).
 - Drag right: switch to the Space on the left (`Control-Left`).
 - Drag left: switch to the Space on the right (`Control-Right`).
 
-The cursor stays anchored, clicks and scroll are suppressed, and each contact stroke triggers at most one action after **Mission gesture distance** (default 5 mm). Lift and touch again for another action. Drag down to dismiss Mission Control with Escape. Releasing Control while touching suppresses the nib click until lift and resumes relative pointing without a jump.
+The cursor stays anchored, clicks and scroll are suppressed, and each contact stroke triggers at most one action after **Mission gesture distance** (default 5 mm). Lift and touch again for another action. Drag down to dismiss Mission Control with Escape. Releasing either modifier while touching suppresses the nib click until lift and resumes relative pointing without a jump.
 
-Uses macOS keyboard shortcuts, which must be enabled under System Settings > Keyboard > Keyboard Shortcuts > Mission Control. This triggers the system transition after the distance threshold; it does not drive an interactive trackpad-style animation. Other pen-button gestures continue working without Control.
+Uses macOS keyboard shortcuts, which must be enabled under System Settings > Keyboard > Keyboard Shortcuts > Mission Control. This triggers the system transition after the distance threshold; it does not drive an interactive trackpad-style animation. Control alone selects scrolling; pen-button gestures retain their own bindings.
 
 ## Platform support
 
@@ -113,7 +113,7 @@ dotnet run --project tests -c Release -p:OtdDirectory=/path/to/OTD/assemblies
 
 For a self-contained single-file app, use the source build directory `OpenTabletDriver.Desktop/bin/Release/net10.0` containing the matching assemblies. Pass `-p:OtdDirectory=/absolute/path/to/OpenTabletDriver.app/Contents/MacOS`. The compiled plugin is `src/bin/Release/net10.0/PenPanScroll.dll`. For direct installation, package that DLL together with the root `metadata.json`; keep both files at the archive's top level.
 
-The 30 tests drive the real OTD report, binding, absolute-output, and relative-output classes with a recording pointer: direction, anchoring, fractional accumulation, lift/re-contact, both button-release orders, right-click preservation, proximity loss, disposal, and fail-open behavior. They do not substitute for physical tablet testing.
+The 31 tests drive the real OTD report, binding, absolute-output, and relative-output classes with a recording pointer: direction, anchoring, fractional accumulation, lift/re-contact, both button-release orders, right-click preservation, proximity loss, disposal, and fail-open behavior. They do not substitute for physical tablet testing.
 
 ## Releasing a new version
 
