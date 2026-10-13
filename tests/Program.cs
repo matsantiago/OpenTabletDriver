@@ -9,6 +9,74 @@ using OpenTabletDriver.Plugin.Tablet;
 
 var tests = new (string, Action)[]
 {
+    ("Control gestures: threshold, inverse horizontal direction and one action per touch", () =>
+    {
+        using var h = new Harness(relative: true);
+        bool ctrl = true;
+        var actions = new List<MissionAction>();
+        h.Filter.MissionGestures = true;
+        h.Filter.ControlPressed = () => ctrl;
+        h.Filter.SendMissionAction = actions.Add;
+        h.Send(10000, 10000, true);
+        h.Send(10900, 10000, true);
+        Check(actions.Count == 0 && !h.Pointer.Left && !h.Pointer.Right);
+        h.Send(11000, 10000, true);
+        h.Send(15000, 10000, true);
+        Check(actions.SequenceEqual(new[] { MissionAction.SpaceLeft }));
+        Check(h.Pointer.Position == Vector2.Zero && h.Pointer.Scroll == Vector2.Zero);
+        h.Send(15000, 10000);
+        h.Send(15000, 10000, true);
+        h.Send(14000, 10000, true);
+        Check(actions.Last() == MissionAction.SpaceRight && actions.Count == 2);
+        ctrl = false;
+        h.Send(12000, 10000, true);
+        Check(!h.Pointer.Left && h.Pointer.Position == Vector2.Zero);
+        h.Send(12200, 10000);
+        Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f);
+        h.Send(12200, 10000, true);
+        Check(h.Pointer.Left);
+    }),
+    ("Control gestures: up overview, hover/down ignored, normal scroll resumes", () =>
+    {
+        using var h = new Harness(relative: true);
+        bool ctrl = true;
+        var actions = new List<MissionAction>();
+        h.Filter.MissionGestures = true;
+        h.Filter.ControlPressed = () => ctrl;
+        h.Filter.SendMissionAction = actions.Add;
+        h.Send(10000, 10000);
+        h.Send(10000, 5000);
+        Check(actions.Count == 0);
+        h.Send(10000, 10000, true);
+        h.Send(10000, 11000, true);
+        Check(actions.Count == 0);
+        h.Send(10000, 9000, true);
+        Check(actions.SequenceEqual(new[] { MissionAction.Overview }));
+        h.Send(10000, 5000, true);
+        Check(actions.Count == 1);
+        h.Send(10000, 5000);
+        ctrl = false;
+        h.Send(10000, 5000, true, true);
+        h.Send(9800, 4800, true, true);
+        Check(h.Pointer.Scroll == new Vector2(10, 10));
+    }),
+    ("Control gestures: proximity loss resets and disabled mode leaves Control-click alone", () =>
+    {
+        using var h = new Harness(relative: true);
+        var actions = new List<MissionAction>();
+        h.Filter.ControlPressed = () => true;
+        h.Filter.SendMissionAction = actions.Add;
+        h.Send(10000, 10000, true);
+        Check(h.Pointer.Left && actions.Count == 0);
+        h.Filter.MissionGestures = true;
+        h.Send(10000, 10000, true);
+        h.Send(11000, 10000, true);
+        h.Mode.Read(new OutOfRangeReport([]));
+        h.Send(30000, 10000, true);
+        Check(actions.Count == 1);
+        h.Send(31000, 10000, true);
+        Check(actions.Count == 2);
+    }),
     ("Relative: scroll anchors, lifting repositions, release does not jump", () =>
     {
         using var h = new Harness(relative: true);

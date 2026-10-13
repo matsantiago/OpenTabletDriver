@@ -1,0 +1,65 @@
+using System.Numerics;
+using System.Runtime.InteropServices;
+
+namespace PenPanScroll;
+
+internal enum MissionAction { Overview, SpaceLeft, SpaceRight }
+
+internal sealed class MissionGesture
+{
+    private Vector2? start;
+    private bool fired;
+
+    public MissionAction? Process(Vector2 raw, bool contact, bool control,
+        double scaleX, double scaleY, double threshold)
+    {
+        if (!contact || !control)
+        {
+            Reset();
+            return null;
+        }
+        start ??= raw;
+        if (fired) return null;
+        double x = (raw.X - start.Value.X) * scaleX;
+        double y = (raw.Y - start.Value.Y) * scaleY;
+        // Dominant axis prevents diagonal noise from selecting two actions.
+        MissionAction? action = Math.Abs(x) > Math.Abs(y) && Math.Abs(x) >= threshold
+            ? (x > 0 ? MissionAction.SpaceLeft : MissionAction.SpaceRight)
+            : y <= -threshold ? MissionAction.Overview : null;
+        if (action != null) fired = true;
+        return action;
+    }
+
+    public void Reset() { start = null; fired = false; }
+}
+
+internal static class MacMissionControl
+{
+    private const string CoreGraphics = "/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics";
+    private const ulong Control = 1UL << 18;
+
+    internal static bool IsControlPressed() => OperatingSystem.IsMacOS() &&
+        (CGEventSourceFlagsState(0) & Control) != 0;
+
+    internal static void Send(MissionAction action)
+    {
+        if (!OperatingSystem.IsMacOS()) return;
+        ushort key = action switch { MissionAction.Overview => 126, MissionAction.SpaceLeft => 123, _ => 124 };
+        // Arrow keys carry the numeric-pad and secondary-Fn flags on macOS.
+        // Do not synthesize Control up/down: the user is physically holding it.
+        const ulong flags = Control | (1UL << 21) | (1UL << 23);
+        for (int i = 0; i < 2; i++)
+        {
+            var ev = CGEventCreateKeyboardEvent(IntPtr.Zero, key, i == 0);
+            if (ev == IntPtr.Zero) return;
+            try { CGEventSetFlags(ev, flags); CGEventPost(0, ev); }
+            finally { CFRelease(ev); }
+        }
+    }
+
+    [DllImport(CoreGraphics)] private static extern ulong CGEventSourceFlagsState(int state);
+    [DllImport(CoreGraphics)] private static extern IntPtr CGEventCreateKeyboardEvent(IntPtr source, ushort key, [MarshalAs(UnmanagedType.I1)] bool down);
+    [DllImport(CoreGraphics)] private static extern void CGEventSetFlags(IntPtr ev, ulong flags);
+    [DllImport(CoreGraphics)] private static extern void CGEventPost(int location, IntPtr ev);
+    [DllImport("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")] private static extern void CFRelease(IntPtr value);
+}

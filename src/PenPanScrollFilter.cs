@@ -14,6 +14,10 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
 {
     private readonly object sync = new();
     private readonly Gesture gesture = new();
+    private readonly MissionGesture missionGesture = new();
+    internal Func<bool> ControlPressed { get; set; } = MacMissionControl.IsControlPressed;
+    internal Action<MissionAction> SendMissionAction { get; set; } = MacMissionControl.Send;
+    private double missionThreshold = 5;
     private IMouseScrollHandler? scroll;
     private IMouseButtonHandler? mouse;
     private MouseButton? clickDown;
@@ -55,6 +59,17 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
     [Property("Contact click type"), DefaultPropertyValue("Right"), PropertyValidated(nameof(ClickTypes))]
     public string ClickType { get; set; } = "Right";
     public static string[] ClickTypes => ["Right", "Middle"];
+
+    [Property("Control Mission gestures"), DefaultPropertyValue(false),
+     ToolTip("Control + nib drag: up opens Mission Control, right moves to the left Space, left to the right Space. One action per stroke.")]
+    public bool MissionGestures { get; set; }
+
+    [Property("Mission gesture distance"), DefaultPropertyValue(5.0), Unit("mm")]
+    public double MissionThreshold
+    {
+        get => missionThreshold;
+        set => missionThreshold = double.IsFinite(value) ? Math.Clamp(value, 1, 50) : 5;
+    }
 
     public PipelinePosition Position => PipelinePosition.PreTransform;
     public event Action<IDeviceReport?>? Emit;
@@ -110,6 +125,7 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
                 ReleaseContactClick();
                 suppressClickUntilLift = false;
                 gesture.Reset(relative);
+                missionGesture.Reset();
                 Emit?.Invoke(report);
                 return;
             }
@@ -127,16 +143,20 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
                 ReleaseContactClick();
                 suppressClickUntilLift = false;
                 gesture.Reset(relative);
+                missionGesture.Reset();
                 Emit?.Invoke(report);
                 return;
             }
 
             bool contact = pen.Pressure > 0;
+            bool mission = MissionGestures && ControlPressed();
+            var missionAction = missionGesture.Process(pen.Position, contact, mission,
+                scaleX, scaleY, MissionThreshold);
             bool clickButton = ClickButtonNumber > 0 && ClickButtonNumber != ButtonNumber &&
                 ClickButtonNumber <= pen.PenButtons.Length && pen.PenButtons[ClickButtonNumber - 1];
             var result = gesture.Process(pen.Position, pen.Pressure > 0,
-                pen.PenButtons[ButtonNumber - 1], scaleX, scaleY,
-                SensitivityX, SensitivityY, ReverseX, ReverseY, relative);
+                mission || pen.PenButtons[ButtonNumber - 1], scaleX, scaleY,
+                mission ? 0 : SensitivityX, mission ? 0 : SensitivityY, ReverseX, ReverseY, relative);
 
             // The side button chooses the nib click instead of adding another
             // button to the normal left click. Scroll takes precedence.
@@ -177,6 +197,13 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
             // The normal output stage releases the nib, positions the pointer,
             // and flushes both scroll axes together in its usual report cycle.
             Emit?.Invoke(report);
+            // First flush the report with the nib released, then post the
+            // shortcut. This prevents Control-click from opening a menu.
+            if (missionAction is { } action)
+            {
+                SendMissionAction(action);
+                Log.Write("Pen Pan/Scroll", $"Control gesture: {action}");
+            }
         }
     }
 
@@ -200,6 +227,7 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
                 synchronous.Flush();
             disposed = true;
             gesture.Reset(relative);
+            missionGesture.Reset();
             scroll = null;
         }
     }
