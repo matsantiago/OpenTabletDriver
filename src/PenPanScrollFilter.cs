@@ -15,6 +15,9 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
     private readonly object sync = new();
     private readonly Gesture gesture = new();
     private readonly MissionGesture missionGesture = new();
+    internal Func<bool> ControlShiftPressed { get; set; } = MacMissionControl.IsControlShiftPressed;
+    private bool missionBlockedUntilLift;
+    internal Action<int, int> SendKeyboardScroll { get; set; } = MacMissionControl.SendScroll;
     internal Func<bool> ControlPressed { get; set; } = MacMissionControl.IsControlPressed;
     internal Action<MissionAction> SendMissionAction { get; set; } = MacMissionControl.Send;
     private double missionThreshold = 5;
@@ -34,6 +37,10 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
 
     [TabletReference]
     public TabletReference? Tablet { get; set; }
+
+    [Property("Scroll trigger"), DefaultPropertyValue("Pen button"), PropertyValidated(nameof(ScrollTriggers))]
+    public string ScrollTrigger { get; set; } = "Pen button";
+    public static string[] ScrollTriggers => ["Pen button", "Control + Shift"];
 
     [Property("Scroll button"), DefaultPropertyValue(1),
      ToolTip("One-based pen button number shown by the tablet debugger. This button is consumed while the filter is enabled.")]
@@ -126,6 +133,7 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
                 suppressClickUntilLift = false;
                 gesture.Reset(relative);
                 missionGesture.Reset();
+                missionBlockedUntilLift = false;
                 Emit?.Invoke(report);
                 return;
             }
@@ -138,29 +146,34 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
 
             if (report is IEraserReport { Eraser: true } ||
                 !float.IsFinite(pen.Position.X) || !float.IsFinite(pen.Position.Y) ||
-                ButtonNumber > pen.PenButtons.Length)
+                (ScrollTrigger == "Pen button" && ButtonNumber > pen.PenButtons.Length))
             {
                 ReleaseContactClick();
                 suppressClickUntilLift = false;
                 gesture.Reset(relative);
                 missionGesture.Reset();
+                missionBlockedUntilLift = false;
                 Emit?.Invoke(report);
                 return;
             }
 
             bool contact = pen.Pressure > 0;
-            bool mission = MissionGestures && ControlPressed();
+            bool keyboardScroll = ScrollTrigger == "Control + Shift" && ControlShiftPressed();
+            if (!contact) missionBlockedUntilLift = false;
+            if (keyboardScroll && contact) missionBlockedUntilLift = true;
+            bool mission = MissionGestures && ControlPressed() && !keyboardScroll && !missionBlockedUntilLift;
+            bool penScroll = ScrollTrigger == "Pen button" && pen.PenButtons[ButtonNumber - 1];
             var missionAction = missionGesture.Process(pen.Position, contact, mission,
                 scaleX, scaleY, MissionThreshold);
-            bool clickButton = ClickButtonNumber > 0 && ClickButtonNumber != ButtonNumber &&
+            bool clickButton = ClickButtonNumber > 0 && (ScrollTrigger != "Pen button" || ClickButtonNumber != ButtonNumber) &&
                 ClickButtonNumber <= pen.PenButtons.Length && pen.PenButtons[ClickButtonNumber - 1];
             var result = gesture.Process(pen.Position, pen.Pressure > 0,
-                mission || pen.PenButtons[ButtonNumber - 1], scaleX, scaleY,
+                mission || keyboardScroll || penScroll, scaleX, scaleY,
                 mission ? 0 : SensitivityX, mission ? 0 : SensitivityY, ReverseX, ReverseY, relative);
 
             // The side button chooses the nib click instead of adding another
             // button to the normal left click. Scroll takes precedence.
-            bool clickConfigured = mouse != null && ClickButtonNumber > 0 && ClickButtonNumber != ButtonNumber &&
+            bool clickConfigured = mouse != null && ClickButtonNumber > 0 && (ScrollTrigger != "Pen button" || ClickButtonNumber != ButtonNumber) &&
                 ClickButtonNumber <= pen.PenButtons.Length;
             bool wantsClick = clickConfigured && clickButton && contact && !result.SuppressTip;
             if (!contact)
@@ -183,20 +196,24 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
             {
                 // Do not mutate arrays shared with the parser/debugger.
                 pen.PenButtons = (bool[])pen.PenButtons.Clone();
-                if (result.SuppressButton)
+                if (keyboardScroll || mission)
+                    Array.Fill(pen.PenButtons, false);
+                else if (result.SuppressButton && ScrollTrigger == "Pen button")
                     pen.PenButtons[ButtonNumber - 1] = false;
                 if (clickConfigured)
                     pen.PenButtons[ClickButtonNumber - 1] = false;
             }
 
-            if (result.Horizontal != 0)
+            if (!keyboardScroll && result.Horizontal != 0)
                 scroll.ScrollHorizontally(result.Horizontal);
-            if (result.Vertical != 0)
+            if (!keyboardScroll && result.Vertical != 0)
                 scroll.ScrollVertically(result.Vertical);
 
             // The normal output stage releases the nib, positions the pointer,
             // and flushes both scroll axes together in its usual report cycle.
             Emit?.Invoke(report);
+            if (keyboardScroll)
+                SendKeyboardScroll(result.Horizontal, result.Vertical);
             // First flush the report with the nib released, then post the
             // shortcut. This prevents Control-click from opening a menu.
             if (missionAction is { } action)
@@ -228,6 +245,7 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
             disposed = true;
             gesture.Reset(relative);
             missionGesture.Reset();
+                missionBlockedUntilLift = false;
             scroll = null;
         }
     }

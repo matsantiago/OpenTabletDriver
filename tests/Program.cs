@@ -9,6 +9,46 @@ using OpenTabletDriver.Plugin.Tablet;
 
 var tests = new (string, Action)[]
 {
+    ("Control+Shift scroll overrides Mission Control, release waits for lift", () =>
+    {
+        using var h = new Harness(relative: true);
+        bool shift = true;
+        var actions = new List<MissionAction>();
+        h.Filter.ScrollTrigger = "Control + Shift";
+        h.Filter.MissionGestures = true;
+        h.Filter.ControlPressed = () => true;
+        h.Filter.ControlShiftPressed = () => shift;
+        h.Filter.SendMissionAction = actions.Add;
+        h.Filter.SendKeyboardScroll = (x, y) => { h.Pointer.ScrollHorizontally(x); h.Pointer.ScrollVertically(y); };
+        h.Send(10000, 10000);
+        h.Send(10000, 10000, true);
+        h.Send(9000, 9000, true);
+        Check(h.Pointer.Scroll == new Vector2(50, 50));
+        Check(actions.Count == 0 && !h.Pointer.Left && h.Pointer.Position == Vector2.Zero);
+        shift = false;
+        h.Send(8000, 8000, true);
+        h.Send(7000, 7000, true);
+        Check(actions.Count == 0 && !h.Pointer.Left);
+        h.Send(7000, 7000);
+        h.Send(7000, 7000, true);
+        h.Send(7000, 6000, true);
+        Check(actions.SequenceEqual(new[] { MissionAction.Overview }));
+    }),
+    ("Keyboard scroll: pen button alone no longer scrolls; hover never scrolls", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Filter.ScrollTrigger = "Control + Shift";
+        h.Filter.ControlShiftPressed = () => false;
+        h.Send(10000, 10000, true, true);
+        h.Send(9800, 9800, true, true);
+        Check(h.Pointer.Scroll == Vector2.Zero);
+        h.Filter.ControlShiftPressed = () => true;
+        int scrolls = 0;
+        h.Filter.SendKeyboardScroll = (x, y) => { if (x != 0 || y != 0) scrolls++; };
+        h.Send(9800, 9800);
+        h.Send(5000, 5000);
+        Check(scrolls == 0 && !h.Pointer.Left && !h.Pointer.Right);
+    }),
     ("Acceleration: short fast writing stays precise; long travel gains; window expires", () =>
     {
         var c = new AccelerationCurve();

@@ -42,6 +42,9 @@ internal static class MacMissionControl
     internal static bool IsControlPressed() => OperatingSystem.IsMacOS() &&
         (CGEventSourceFlagsState(0) & Control) != 0;
 
+    internal static bool IsControlShiftPressed() => OperatingSystem.IsMacOS() &&
+        (CGEventSourceFlagsState(0) & (Control | (1UL << 17))) == (Control | (1UL << 17));
+
     internal static void Send(MissionAction action)
     {
         if (!OperatingSystem.IsMacOS()) return;
@@ -58,6 +61,21 @@ internal static class MacMissionControl
         }
     }
 
+    internal static void SendScroll(int horizontal, int vertical)
+    {
+        if (!OperatingSystem.IsMacOS() || (horizontal == 0 && vertical == 0)) return;
+        var ev = CGEventCreateScrollWheelEvent2(IntPtr.Zero, 0, 2, -vertical, -horizontal, 0);
+        if (ev == IntPtr.Zero) return;
+        try
+        {
+            // The modifier chord selects our gesture, not app zoom/Shift-scroll.
+            CGEventSetFlags(ev, 0);
+            CGEventPost(0, ev);
+        }
+        finally { CFRelease(ev); }
+    }
+
+    [DllImport(CoreGraphics)] private static extern IntPtr CGEventCreateScrollWheelEvent2(IntPtr source, int unit, uint axes, int vertical, int horizontal, int third);
     [DllImport(CoreGraphics)] private static extern ulong CGEventSourceFlagsState(int state);
     [DllImport(CoreGraphics)] private static extern IntPtr CGEventCreateKeyboardEvent(IntPtr source, ushort key, [MarshalAs(UnmanagedType.I1)] bool down);
     [DllImport(CoreGraphics)] private static extern void CGEventSetFlags(IntPtr ev, ulong flags);
