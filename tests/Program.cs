@@ -46,7 +46,8 @@ var tests = new (string, Action)[]
         h.Send(10400, 10000, true);
         h.Mode.Read(new OutOfRangeReport([]));
         Check(h.Pointer.Events.Count(e => e == "up:Middle") == 2);
-        h.Send(10400, 10000, true);
+        // OTD skips an identical first sample after proximity return.
+        h.Send(10600, 10000, true);
         h.Filter.Dispose();
         Check(h.Pointer.Events.Count(e => e == "up:Middle") == 3);
     }),
