@@ -14,6 +14,7 @@ public sealed class PointerAccelerationFilter : IPositionedPipelineElement<IDevi
 {
     private RelativeOutputMode? output;
     private readonly AccelerationCurve curve = new();
+    private readonly ReportDiagnostics diagnostics = new();
     private double startSpeed = 20, fullSpeed = 150, maxGain = 2, smoothing = 20;
     private bool disposed;
     private double travelDistance = 3, travelWindow = 100;
@@ -45,6 +46,10 @@ public sealed class PointerAccelerationFilter : IPositionedPipelineElement<IDevi
      ToolTip("Window for net physical displacement. Back-and-forth motion cancels instead of accumulating distance.")]
     public double TravelWindow { get => travelWindow; set => travelWindow = Valid(value, 10, 500, 100); }
 
+    [Property("Diagnostic logging"), DefaultPropertyValue(false),
+     ToolTip("Logs relative delta before/after acceleration and cursor state, including unusually large deltas.")]
+    public bool DiagnosticLogging { get; set; }
+
     public PipelinePosition Position => PipelinePosition.PostTransform;
     public event Action<IDeviceReport?>? Emit;
 
@@ -69,6 +74,7 @@ public sealed class PointerAccelerationFilter : IPositionedPipelineElement<IDevi
                 curve.Reset();
             else if (report is IAbsolutePositionReport position)
             {
+                var inputDelta = position.Position;
                 // Undo OTD's scale/rotation only to measure physical speed. Apply
                 // one isotropic gain to the original delta, preserving direction.
                 var digitizer = output.Tablet?.Properties.Specifications.Digitizer;
@@ -81,6 +87,8 @@ public sealed class PointerAccelerationFilter : IPositionedPipelineElement<IDevi
                         StartSpeed, FullSpeed, MaxGain, Smoothing, output.ResetTime.TotalSeconds, TravelDistance, TravelWindow / 1000);
                 }
                 else curve.Reset();
+                if (DiagnosticLogging)
+                    diagnostics.Trace("output", $"deltaIn={inputDelta} deltaOut={position.Position}", position.Position);
             }
         }
         Emit?.Invoke(report);

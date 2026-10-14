@@ -10,6 +10,10 @@ In Relative Mode, the filter keeps a virtual coordinate offset. Releasing the sc
 
 Optional contact clicks: set **Contact click button** to a different pen button and choose **Right** or **Middle**. Holding that side button alone never clicks. Touching the nib replaces the left click with the chosen click; lifting releases it. Releasing the side button while touching releases the click and suppresses left click until the nib lifts. Scroll has priority if both buttons are held. Zero disables contact-click substitution.
 
+## Temporary cursor diagnostics
+
+Both filters expose **Diagnostic logging**, disabled by default. Enable on both to log numeric input/virtual coordinates, modifier/gesture state, delta before/after acceleration, and system cursor location/visibility. Samples are limited to one per second, with additional output samples for deltas exceeding 200 pixels (at most four per second). No screenshots or application content are recorded. Records go to OTD's normal logs under group `Cursor diagnostics`. No cursor movement is changed by diagnostics; turn off both settings after troubleshooting.
+
 ## Control + Command zoom
 
 Enable **Control + Command zoom**: hold Control and Command, touch the nib and drag vertically. Sends pixel scroll with Command for application zoom, as documented for FigJam on Mac. Horizontal movement is ignored. Control alone continues normal scroll with cleared flags. Shift selects Mission gestures and Option selects middle click. Lift before changing chords; one contact stroke cannot switch between zoom and scroll.

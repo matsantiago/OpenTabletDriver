@@ -14,6 +14,7 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
 {
     private readonly object sync = new();
     private readonly Gesture gesture = new();
+    private readonly ReportDiagnostics diagnostics = new();
     private readonly MissionGesture missionGesture = new();
     internal Func<KeyboardModifiers> ReadModifiers { get; set; } = MacMissionControl.ReadModifiers;
     private int keyboardGesture;
@@ -84,6 +85,10 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
         get => missionThreshold;
         set => missionThreshold = double.IsFinite(value) ? Math.Clamp(value, 1, 50) : 5;
     }
+
+    [Property("Diagnostic logging"), DefaultPropertyValue(false),
+     ToolTip("Logs numeric pen coordinates, active gesture and cursor state once a second for troubleshooting.")]
+    public bool DiagnosticLogging { get; set; }
 
     public PipelinePosition Position => PipelinePosition.PreTransform;
     public event Action<IDeviceReport?>? Emit;
@@ -208,6 +213,8 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
                 mouse!.MouseDown(clickDown.Value);
             }
 
+            if (DiagnosticLogging)
+                diagnostics.Trace("input", $"raw={pen.Position} virtual={result.Position} contact={contact} modifiers={modifiers} stroke={keyboardGesture} scroll={keyboardScroll} zoom={zoom} middle={middle} mission={mission} suppressTip={result.SuppressTip}");
             pen.Position = result.Position;
             if (middle || result.SuppressTip || (clickConfigured && clickButton) || suppressClickUntilLift)
                 pen.Pressure = 0;

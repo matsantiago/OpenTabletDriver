@@ -1,5 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
-  <PropertyGroup><AssemblyName>PenPanScroll</AssemblyName><Version>1.7.0</Version></PropertyGroup>
+  <PropertyGroup><AssemblyName>PenPanScroll</AssemblyName><Version>1.8.0</Version></PropertyGroup>
   <ItemGroup>
     <Reference Include="OpenTabletDriver.Plugin"><HintPath>$(OtdDirectory)/OpenTabletDriver.Plugin.dll</HintPath><Private>false</Private></Reference>
     <Reference Include="OpenTabletDriver"><HintPath>$(OtdDirectory)/OpenTabletDriver.dll</HintPath><Private>false</Private></Reference>
