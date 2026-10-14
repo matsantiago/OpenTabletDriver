@@ -15,10 +15,13 @@ internal sealed class Gesture
     private double remainderX, remainderY;
     private Vector2 relativeOffset;
     private bool rebase;
+    private readonly AccelerationCurve scrollAcceleration = new();
 
     public GestureResult Process(Vector2 raw, bool contact, bool button,
         double unitsToMmX, double unitsToMmY, double sensitivityX, double sensitivityY,
-        bool reverseX, bool reverseY, bool relative = false)
+        bool reverseX, bool reverseY, bool relative = false,
+        double time = 0, double startSpeed = 20, double fullSpeed = 150,
+        double maxGain = 1, double smoothingMs = 20)
     {
         if (relative && rebase)
         {
@@ -51,15 +54,23 @@ internal sealed class Gesture
         int x = 0, y = 0;
         if (contact)
         {
+            var mm = previousContact is { } last
+                ? new Vector2((float)(((double)last.X - raw.X) * unitsToMmX),
+                    (float)(((double)last.Y - raw.Y) * unitsToMmY))
+                : Vector2.Zero;
+            // Measure physical speed before sensitivity, axis reversal and integer
+            // rounding. One gain preserves the direction of diagonal scrolling.
+            double gain = scrollAcceleration.Apply(Vector2.UnitX, mm, time,
+                startSpeed, fullSpeed, maxGain, smoothingMs, 0.1).X;
             if (previousContact is { } previous)
             {
                 // OTD's macOS scroll handler negates amounts before posting them.
                 // Positive handler values therefore scroll down/right. Natural
                 // scrolling maps upward/leftward pen motion to those values.
                 x = Accumulate(ref remainderX,
-                    ((double)previous.X - raw.X) * unitsToMmX * sensitivityX * (reverseX ? -1 : 1));
+                    ((double)previous.X - raw.X) * unitsToMmX * sensitivityX * gain * (reverseX ? -1 : 1));
                 y = Accumulate(ref remainderY,
-                    ((double)previous.Y - raw.Y) * unitsToMmY * sensitivityY * (reverseY ? -1 : 1));
+                    ((double)previous.Y - raw.Y) * unitsToMmY * sensitivityY * gain * (reverseY ? -1 : 1));
             }
             previousContact = raw;
         }
@@ -84,6 +95,7 @@ internal sealed class Gesture
 
     private void ClearStroke()
     {
+        scrollAcceleration.Reset();
         previousContact = null;
         remainderX = remainderY = 0;
     }

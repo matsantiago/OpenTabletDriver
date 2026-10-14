@@ -12,6 +12,103 @@ using OpenTabletDriver.Plugin.Tablet;
 
 var tests = new (string, Action)[]
 {
+    ("Scroll acceleration: equal distance scrolls farther at higher speed in both modes", () =>
+    {
+        foreach (bool relative in new[] { false, true })
+        foreach (var (seconds, pixels) in new[] { (0.08, 10), (0.02, 15), (0.005, 20) })
+        {
+            using var h = new Harness(relative);
+            double time = 0;
+            h.Filter.Clock = () => time;
+            h.Filter.ScrollStartSpeed = 20;
+            h.Filter.ScrollFullSpeed = 80;
+            h.Filter.ScrollSmoothing = 0;
+            h.Send(10000, 10000, true, true);
+            var anchor = h.Pointer.Position;
+            time = seconds;
+            h.Send(9800, 10000, true, true);
+            Check(h.Pointer.Scroll == new Vector2(pixels, 0));
+            Check(h.Pointer.Position == anchor && !h.Pointer.Left);
+        }
+    }),
+    ("Scroll acceleration: Control scroll accelerates but Command zoom does not", () =>
+    {
+        foreach (bool zoom in new[] { false, true })
+        {
+            using var h = new Harness(relative: true);
+            double time = 0;
+            h.Filter.Clock = () => time;
+            h.Filter.ScrollSmoothing = 0;
+            h.Filter.ScrollTrigger = "Control";
+            h.Filter.ZoomGesture = true;
+            h.Filter.ReadModifiers = () => new(true, false, false, zoom);
+            var events = new List<(int X, int Y, bool Zoom)>();
+            h.Filter.SendKeyboardScroll = (x, y, z) => { if (x != 0 || y != 0) events.Add((x, y, z)); };
+            h.Send(10000, 10000, true);
+            time = 0.005;
+            h.Send(9800, 9800, true);
+            Check(events.SequenceEqual(new[] { zoom ? (0, 10, true) : (20, 20, false) }));
+        }
+    }),
+    ("Scroll acceleration: lift, release, range loss and report gaps reset speed", () =>
+    {
+        foreach (string boundary in new[] { "lift", "release", "range", "gap" })
+        {
+            using var h = new Harness();
+            double time = 0;
+            h.Filter.Clock = () => time;
+            h.Filter.ScrollSmoothing = 0;
+            h.Send(10000, 10000, true, true);
+            time = 0.005;
+            h.Send(9800, 10000, true, true);
+            Check(h.Pointer.Scroll.X == 20);
+            h.Filter.ScrollSmoothing = 200;
+            if (boundary == "lift") h.Send(9800, 10000, false, true);
+            if (boundary == "release") h.Send(9800, 10000, true, false);
+            if (boundary == "range") h.Mode.Read(new OutOfRangeReport([]));
+            if (boundary == "gap") time = 1;
+            else
+            {
+                time = 0.01;
+                h.Send(9600, 10000, true, true);
+                Check(h.Pointer.Scroll.X == 20);
+                time = 0.015;
+            }
+            h.Send(boundary == "gap" ? 9600 : 9400, 10000, true, true);
+            Check(h.Pointer.Scroll.X == 30);
+        }
+    }),
+    ("Scroll acceleration: fractions, reversal, disabled axis and gain one", () =>
+    {
+        foreach (double gain in new[] { 1.0, 2.0 })
+        {
+            using var h = new Harness();
+            double time = 0;
+            h.Filter.Clock = () => time;
+            h.Filter.ScrollMaxGain = gain;
+            h.Filter.ScrollSmoothing = 0;
+            h.Filter.SensitivityY = 0;
+            h.Filter.ReverseX = true;
+            h.Send(10000, 10000, true, true);
+            for (int i = 1; i <= 200; i++)
+            {
+                time = i * 0.00001;
+                h.Send(10000 - i, 10000 - i, true, true);
+            }
+            Check(h.Pointer.Scroll == new Vector2((float)(-10 * gain), 0));
+            time += 0.01;
+            h.Send(9800, 9800, true, true);
+            Check(h.Pointer.Scroll == new Vector2((float)(-10 * gain), 0));
+        }
+    }),
+    ("Scroll acceleration: invalid settings normalize", () =>
+    {
+        using var f = new PenPanScrollFilter
+        { ScrollStartSpeed = double.NaN, ScrollFullSpeed = double.PositiveInfinity,
+          ScrollMaxGain = -1, ScrollSmoothing = -1 };
+        Check(f.ScrollStartSpeed == 20 && f.ScrollFullSpeed == 150);
+        Check(f.ScrollMaxGain == 1 && f.ScrollSmoothing == 0);
+    }),
     ("Bosto zero hover then re-entry cannot produce a full-tablet cursor jump", () =>
     {
         using var h = new Harness(relative: true);
@@ -592,7 +689,8 @@ sealed class Harness : IDisposable
 {
     public FakePointer Pointer { get; } = new();
     public OutputMode Mode { get; }
-    public PenPanScrollFilter Filter { get; } = new() { ReadModifiers = () => default };
+    // Timing-sensitive tests supply their own clock; other tests exercise base sensitivity.
+    public PenPanScrollFilter Filter { get; } = new() { ReadModifiers = () => default, Clock = () => 0 };
     public BindingHandler Bindings { get; }
 
     public Harness(bool relative = false)

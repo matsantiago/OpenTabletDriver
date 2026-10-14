@@ -36,6 +36,19 @@ Set **Scroll trigger** to **Control**: Control + nib drag scrolls with the curso
 
 Reads left/right modifier keys from the physical HID key state instead of flags on synthetic events. Keyboard-triggered scroll posts pixel scroll events with modifier flags cleared, avoiding application zoom or Shift axis switching. The original **Pen button** trigger remains available.
 
+## Scroll acceleration
+
+Pen-button and Control scrolling now increase pixels per millimetre with physical pen speed in both Absolute and Relative Mode. Slow movement retains **Horizontal/Vertical sensitivity**; fast movement smoothly reaches that sensitivity multiplied by **Scroll maximum gain**. For example, 10 px/mm becomes up to 20 px/mm with the default 2× gain. Command zoom and Mission gestures keep their existing behavior.
+
+| Control | Default | Meaning |
+|---|---|---|
+| Scroll acceleration starts at | 20 mm/s | Below this speed, retain base scroll sensitivity |
+| Scroll maximum gain at | 150 mm/s | Speed where the smooth curve reaches maximum gain; set above the start speed |
+| Scroll maximum gain | 2× | Maximum multiplier of both axes' px/mm; 1 disables acceleration |
+| Scroll speed smoothing | 20 ms | Smooth the speed estimate without delaying scroll; 0 uses instantaneous speed |
+
+Lifting the nib, releasing the scroll trigger, leaving proximity or a report gap longer than 100 ms resets the speed estimate. Fractional pixels still accumulate, axis reversal is preserved and an axis with zero sensitivity stays disabled. These controls are independent of pointer acceleration.
+
 ## Relative Pointer Acceleration
 
 Enable the separate **Relative Pointer Acceleration** filter in the same plugin package. It runs after OTD transforms relative motion and scales only pointer deltas; pen scrolling and Mission Control gestures retain their own sensitivity/distance. Absolute Mode is passed through.

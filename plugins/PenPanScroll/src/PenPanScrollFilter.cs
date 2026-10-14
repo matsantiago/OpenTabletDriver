@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Numerics;
 using OpenTabletDriver;
 using OpenTabletDriver.Plugin;
@@ -31,6 +32,8 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
     private bool relative;
     private int buttonNumber = 1;
     private double sensitivityX = 10, sensitivityY = 10;
+    private double scrollStartSpeed = 20, scrollFullSpeed = 150, scrollMaxGain = 2, scrollSmoothing = 20;
+    internal Func<double> Clock { get; set; } = () => Stopwatch.GetTimestamp() / (double)Stopwatch.Frequency;
 
     [Resolved]
     public IDriver? Driver { get; set; }
@@ -52,6 +55,21 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
 
     [Property("Vertical sensitivity"), DefaultPropertyValue(10.0), Unit("px/mm")]
     public double SensitivityY { get => sensitivityY; set => sensitivityY = ValidateSensitivity(value); }
+
+    [Property("Scroll acceleration starts at"), DefaultPropertyValue(20.0), Unit("mm/s")]
+    public double ScrollStartSpeed { get => scrollStartSpeed; set => scrollStartSpeed = Valid(value, 0, 5000, 20); }
+
+    [Property("Scroll maximum gain at"), DefaultPropertyValue(150.0), Unit("mm/s"),
+     ToolTip("Speed where scroll reaches maximum gain. Set above Scroll acceleration starts at.")]
+    public double ScrollFullSpeed { get => scrollFullSpeed; set => scrollFullSpeed = Valid(value, 1, 10000, 150); }
+
+    [Property("Scroll maximum gain"), DefaultPropertyValue(2.0), Unit("×"),
+     ToolTip("Multiplies scroll px/mm at high pen speed. 1 disables acceleration. Does not affect Command zoom.")]
+    public double ScrollMaxGain { get => scrollMaxGain; set => scrollMaxGain = Valid(value, 1, 10, 2); }
+
+    [Property("Scroll speed smoothing"), DefaultPropertyValue(20.0), Unit("ms"),
+     ToolTip("Smooths measured pen speed without delaying scroll. Zero uses instantaneous speed.")]
+    public double ScrollSmoothing { get => scrollSmoothing; set => scrollSmoothing = Valid(value, 0, 200, 20); }
 
     [Property("Reverse horizontal"), DefaultPropertyValue(false)]
     public bool ReverseX { get; set; }
@@ -209,7 +227,8 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
                 ClickButtonNumber <= pen.PenButtons.Length && pen.PenButtons[ClickButtonNumber - 1];
             var result = gesture.Process(pen.Position, pen.Pressure > 0,
                 mission || keyboardScroll || zoom || penScroll, scaleX, scaleY,
-                mission ? 0 : SensitivityX, mission ? 0 : SensitivityY, ReverseX, ReverseY, relative);
+                mission ? 0 : SensitivityX, mission ? 0 : SensitivityY, ReverseX, ReverseY, relative,
+                Clock(), ScrollStartSpeed, ScrollFullSpeed, mission || zoom ? 1 : ScrollMaxGain, ScrollSmoothing);
 
             // The side button chooses the nib click instead of adding another
             // button to the normal left click. Scroll takes precedence.
@@ -279,6 +298,9 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
 
     private static double ValidateSensitivity(double value) =>
         double.IsFinite(value) ? Math.Clamp(value, 0, 1000) : 10;
+
+    private static double Valid(double value, double min, double max, double fallback) =>
+        double.IsFinite(value) ? Math.Clamp(value, min, max) : fallback;
 
     public void Dispose()
     {
