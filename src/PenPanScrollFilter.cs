@@ -112,6 +112,7 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
 
     internal void Configure(TabletReference tablet, OutputMode output)
     {
+        Tablet = tablet;
         var digitizer = tablet.Properties.Specifications.Digitizer;
         if (digitizer == null || digitizer.MaxX == 0 || digitizer.MaxY == 0 ||
             !float.IsFinite(digitizer.Width) || !float.IsFinite(digitizer.Height) ||
@@ -169,6 +170,23 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
                 return;
             }
 
+            // This Bosto emits a zero-coordinate hover sample when the pen
+            // leaves range. Treat it as a proximity boundary, never as movement
+            // to the origin. Rebase the next valid sample in Relative Mode.
+            if (relative && Tablet?.Properties.Name == "Bosto BT-12HD" &&
+                pen.Position == Vector2.Zero && pen.Pressure == 0)
+            {
+                ReleaseContactClick();
+                suppressClickUntilLift = false;
+                gesture.Reset(relative);
+                missionGesture.Reset();
+                keyboardGesture = 0;
+                if (DiagnosticLogging)
+                    diagnostics.Trace("zero-hover boundary", $"rawBytes={Convert.ToHexString(pen.Raw)} rebasing next position");
+                Emit?.Invoke(new OutOfRangeReport(pen.Raw));
+                return;
+            }
+
             bool contact = pen.Pressure > 0;
             var modifiers = ReadModifiers();
             bool wantsMiddle = MiddleClickGesture && modifiers.Control && modifiers.Option;
@@ -214,7 +232,7 @@ public sealed class PenPanScrollFilter : IPositionedPipelineElement<IDeviceRepor
             }
 
             if (DiagnosticLogging)
-                diagnostics.Trace("input", $"raw={pen.Position} virtual={result.Position} contact={contact} modifiers={modifiers} stroke={keyboardGesture} scroll={keyboardScroll} zoom={zoom} middle={middle} mission={mission} suppressTip={result.SuppressTip}");
+                diagnostics.Trace("input", $"raw={pen.Position} rawBytes={Convert.ToHexString(pen.Raw)} virtual={result.Position} contact={contact} modifiers={modifiers} stroke={keyboardGesture} scroll={keyboardScroll} zoom={zoom} middle={middle} mission={mission} suppressTip={result.SuppressTip}");
             pen.Position = result.Position;
             if (middle || result.SuppressTip || (clickConfigured && clickButton) || suppressClickUntilLift)
                 pen.Pressure = 0;

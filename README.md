@@ -10,6 +10,10 @@ In Relative Mode, the filter keeps a virtual coordinate offset. Releasing the sc
 
 Optional contact clicks: set **Contact click button** to a different pen button and choose **Right** or **Middle**. Holding that side button alone never clicks. Touching the nib replaces the left click with the chosen click; lifting releases it. Releasing the side button while touching releases the click and suppresses left click until the nib lifts. Scroll has priority if both buttons are held. Zero disables contact-click substitution.
 
+## Bosto relative zero-coordinate boundary
+
+Diagnostics captured a zero-coordinate, zero-pressure sample followed within milliseconds by a whole-tablet relative jump on the Bosto BT-12HD. In Relative Mode only, this filter now treats that sample as a proximity boundary, releases any contact click and rebases the next valid position. Zero-pressure hover at the exact origin is ignored until the next nonzero sample. Absolute Mode and other tablets retain their previous behavior. Two regression tests reproduced the jump before the fix and pass after it. Raw report bytes are included in numeric diagnostics for further protocol investigation.
+
 ## Temporary cursor diagnostics
 
 Both filters expose **Diagnostic logging**, disabled by default. Enable on both to log numeric input/virtual coordinates, modifier/gesture state, delta before/after acceleration, and system cursor location/visibility. Samples are limited to one per second, with additional output samples for deltas exceeding 200 pixels (at most four per second). No screenshots or application content are recorded. Records go to OTD's normal logs under group `Cursor diagnostics`. No cursor movement is changed by diagnostics; turn off both settings after troubleshooting.
@@ -127,7 +131,7 @@ dotnet run --project tests -c Release -p:OtdDirectory=/path/to/OTD/assemblies
 
 For a self-contained single-file app, use the source build directory `OpenTabletDriver.Desktop/bin/Release/net10.0` containing the matching assemblies. Pass `-p:OtdDirectory=/absolute/path/to/OpenTabletDriver.app/Contents/MacOS`. The compiled plugin is `src/bin/Release/net10.0/PenPanScroll.dll`. For direct installation, package that DLL together with the root `metadata.json`; keep both files at the archive's top level.
 
-The 35 tests drive the real OTD report, binding, absolute-output, and relative-output classes with a recording pointer: direction, anchoring, fractional accumulation, lift/re-contact, both button-release orders, right-click preservation, proximity loss, disposal, and fail-open behavior. They do not substitute for physical tablet testing.
+The 37 tests drive the real OTD report, binding, absolute-output, and relative-output classes with a recording pointer: direction, anchoring, fractional accumulation, lift/re-contact, both button-release orders, right-click preservation, proximity loss, disposal, and fail-open behavior. They do not substitute for physical tablet testing.
 
 ## Releasing a new version
 

@@ -9,6 +9,37 @@ using OpenTabletDriver.Plugin.Tablet;
 
 var tests = new (string, Action)[]
 {
+    ("Bosto zero hover then re-entry cannot produce a full-tablet cursor jump", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Mode.Tablet!.Properties.Name = "Bosto BT-12HD";
+        h.Send(8000, 7000);
+        h.Send(8200, 7000);
+        var before = h.Pointer.Position;
+        h.Send(0, 0);
+        Check(Vector2.Distance(h.Pointer.Position, before) < 0.001f);
+        h.Send(11000, 9000);
+        Check(Vector2.Distance(h.Pointer.Position, before) < 0.001f);
+        h.Send(11200, 9000);
+        Check(Vector2.Distance(h.Pointer.Position, before + new Vector2(40, 0)) < 0.001f);
+    }),
+    ("Bosto zero sentinel releases middle and scroll resumes without jump", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Mode.Tablet!.Properties.Name = "Bosto BT-12HD";
+        h.Filter.MiddleClickGesture = true;
+        h.Filter.ReadModifiers = () => new(true, false, true);
+        h.Send(8000, 7000, true);
+        h.Send(0, 0);
+        Check(h.Pointer.Events.Contains("up:Middle"));
+        h.Filter.ReadModifiers = () => default;
+        h.Send(12000, 9000);
+        Check(h.Pointer.Position == Vector2.Zero);
+        h.Send(12000, 9000, true, true);
+        h.Send(11800, 8800, true, true);
+        Check(h.Pointer.Scroll == new Vector2(10, 10));
+        Check(h.Pointer.Position == Vector2.Zero);
+    }),
     ("Zoom sends vertical Command-scroll, normal scroll has no modifiers", () =>
     {
         using var h = new Harness(relative: true);
