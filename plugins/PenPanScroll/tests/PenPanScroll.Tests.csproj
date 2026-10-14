@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+<PropertyGroup><OutputType>Exe</OutputType><AssemblyName>PenPanScroll.Tests</AssemblyName></PropertyGroup>
+<ItemGroup><ProjectReference Include="../src/PenPanScroll.csproj" />
+<Reference Include="OpenTabletDriver.Plugin"><HintPath>$(OtdDirectory)/OpenTabletDriver.Plugin.dll</HintPath></Reference>
+<Reference Include="OpenTabletDriver"><HintPath>$(OtdDirectory)/OpenTabletDriver.dll</HintPath></Reference>
+<Reference Include="OpenTabletDriver.Desktop"><HintPath>$(OtdDirectory)/OpenTabletDriver.Desktop.dll</HintPath></Reference>
+<Reference Include="OpenTabletDriver.Configurations"><HintPath>$(OtdDirectory)/OpenTabletDriver.Configurations.dll</HintPath></Reference>
+<Reference Include="OpenTabletDriver.Native"><HintPath>$(OtdDirectory)/OpenTabletDriver.Native.dll</HintPath></Reference>
+
+</ItemGroup></Project>

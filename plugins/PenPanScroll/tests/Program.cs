@@ -1,0 +1,679 @@
+using System.Numerics;
+using PenPanScroll;
+using OpenTabletDriver.Configurations.Parsers.Wacom.IntuosV3;
+using OpenTabletDriver.Desktop.Binding;
+using OpenTabletDriver.Plugin;
+using OpenTabletDriver.Plugin.Output;
+using OpenTabletDriver.Plugin.Platform.Pointer;
+using OpenTabletDriver.Plugin.Tablet;
+
+var tests = new (string, Action)[]
+{
+    ("Bosto zero hover then re-entry cannot produce a full-tablet cursor jump", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Mode.Tablet!.Properties.Name = "Bosto BT-12HD";
+        h.Send(8000, 7000);
+        h.Send(8200, 7000);
+        var before = h.Pointer.Position;
+        h.Send(0, 0);
+        Check(Vector2.Distance(h.Pointer.Position, before) < 0.001f);
+        h.Send(11000, 9000);
+        Check(Vector2.Distance(h.Pointer.Position, before) < 0.001f);
+        h.Send(11200, 9000);
+        Check(Vector2.Distance(h.Pointer.Position, before + new Vector2(40, 0)) < 0.001f);
+    }),
+    ("Bosto zero sentinel releases middle and scroll resumes without jump", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Mode.Tablet!.Properties.Name = "Bosto BT-12HD";
+        h.Filter.MiddleClickGesture = true;
+        h.Filter.ReadModifiers = () => new(true, false, true);
+        h.Send(8000, 7000, true);
+        h.Send(0, 0);
+        Check(h.Pointer.Events.Contains("up:Middle"));
+        h.Filter.ReadModifiers = () => default;
+        h.Send(12000, 9000);
+        Check(h.Pointer.Position == Vector2.Zero);
+        h.Send(12000, 9000, true, true);
+        h.Send(11800, 8800, true, true);
+        Check(h.Pointer.Scroll == new Vector2(10, 10));
+        Check(h.Pointer.Position == Vector2.Zero);
+    }),
+    ("Zoom sends vertical Command-scroll, normal scroll has no modifiers", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Filter.ScrollTrigger = "Control";
+        h.Filter.ZoomGesture = h.Filter.MissionGestures = true;
+        bool command = true;
+        h.Filter.ReadModifiers = () => new(true, false, false, command);
+        var events = new List<(int X, int Y, bool Zoom)>();
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { if (x != 0 || y != 0) events.Add((x, y, zoom)); };
+        h.Filter.SendMissionAction = _ => throw new Exception("Unexpected Mission");
+        h.Send(10000, 10000);
+        h.Send(10000, 10000, true);
+        h.Send(9800, 9800, true);
+        Check(events.SequenceEqual(new[] { (0, 10, true) }));
+        Check(h.Pointer.Position == Vector2.Zero && !h.Pointer.Left);
+        command = false;
+        h.Send(9600, 9600, true);
+        Check(events.Count == 1 && !h.Pointer.Left);
+        h.Send(9600, 9600);
+        h.Send(9600, 9600, true);
+        h.Send(9400, 9400, true);
+        Check(events.Last() == (10, 10, false));
+        Check(MacMissionControl.ScrollFlags(true) == 1UL << 20 && MacMissionControl.ScrollFlags(false) == 0);
+    }),
+    ("Adding Command mid-scroll does not switch to zoom before lift", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Filter.ScrollTrigger = "Control";
+        h.Filter.ZoomGesture = true;
+        bool command = false;
+        h.Filter.ReadModifiers = () => new(true, false, false, command);
+        int zoomEvents = 0;
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { if (zoom && y != 0) zoomEvents++; };
+        h.Send(10000, 10000, true);
+        command = true;
+        h.Send(10000, 9000, true);
+        Check(zoomEvents == 0);
+        h.Send(10000, 9000);
+        h.Send(10000, 9000, true);
+        h.Send(10000, 8800, true);
+        Check(zoomEvents == 1);
+    }),
+    ("Control Option middle: touch only, movement preserved, no scroll or Mission, release on lift", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Filter.ScrollTrigger = "Control";
+        h.Filter.MissionGestures = h.Filter.MiddleClickGesture = true;
+        h.Filter.ReadModifiers = () => new(true, false, true);
+        h.Filter.SendMissionAction = _ => throw new Exception("Unexpected Mission");
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { Check(x == 0 && y == 0); };
+        h.Send(10000, 10000);
+        Check(!h.Pointer.Events.Contains("down:Middle"));
+        h.Send(10000, 10000, true);
+        Check(h.Pointer.Events.Count(e => e == "down:Middle") == 1 && !h.Pointer.Left);
+        h.Send(10200, 10000, true);
+        Check(h.Pointer.Events.Count(e => e == "down:Middle") == 1);
+        Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f);
+        h.Send(10200, 10000);
+        Check(h.Pointer.Events.Count(e => e == "up:Middle") == 1);
+    }),
+    ("Middle chord release cannot become scroll or left click before lift; range loss releases", () =>
+    {
+        using var h = new Harness(relative: true);
+        bool option = true;
+        h.Filter.ScrollTrigger = "Control";
+        h.Filter.MiddleClickGesture = true;
+        h.Filter.ReadModifiers = () => new(true, false, option);
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { Check(x == 0 && y == 0); };
+        h.Send(10000, 10000, true);
+        option = false;
+        h.Send(10200, 10000, true);
+        Check(h.Pointer.Events.Contains("up:Middle") && !h.Pointer.Left);
+        h.Send(10400, 10000, true);
+        Check(!h.Pointer.Left && h.Pointer.Scroll == Vector2.Zero);
+        h.Send(10400, 10000);
+        option = true;
+        h.Send(10400, 10000, true);
+        h.Mode.Read(new OutOfRangeReport([]));
+        Check(h.Pointer.Events.Count(e => e == "up:Middle") == 2);
+        // OTD skips an identical first sample after proximity return.
+        h.Send(10600, 10000, true);
+        h.Filter.Dispose();
+        Check(h.Pointer.Events.Count(e => e == "up:Middle") == 3);
+    }),
+    ("Mission chord never scrolls, even when Shift is released mid-contact", () =>
+    {
+        using var h = new Harness(relative: true);
+        bool shift = true;
+        h.Filter.ScrollTrigger = "Control";
+        h.Filter.MissionGestures = true;
+        h.Filter.ReadModifiers = () => new(true, shift);
+        var actions = new List<MissionAction>();
+        h.Filter.SendMissionAction = actions.Add;
+        int scrolls = 0;
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { if (x != 0 || y != 0) scrolls++; };
+        h.Send(10000, 10000, true);
+        h.Send(10000, 9000, true);
+        Check(actions.SequenceEqual(new[] { MissionAction.Overview }) && scrolls == 0);
+        shift = false;
+        h.Send(10000, 8000, true);
+        h.Send(10000, 7000, true);
+        Check(scrolls == 0 && !h.Pointer.Left);
+        h.Send(10000, 7000);
+        h.Send(10000, 7000, true);
+        h.Send(10000, 6800, true);
+        Check(scrolls == 1 && actions.Count == 1);
+    }),
+    ("Control scroll and Control+Shift Mission Control stay exclusive per stroke", () =>
+    {
+        using var h = new Harness(relative: true);
+        bool shift = false;
+        var actions = new List<MissionAction>();
+        h.Filter.ScrollTrigger = "Control";
+        h.Filter.MissionGestures = true;
+        h.Filter.ReadModifiers = () => new(true, shift);
+        h.Filter.SendMissionAction = actions.Add;
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { h.Pointer.ScrollHorizontally(x); h.Pointer.ScrollVertically(y); };
+        h.Send(10000, 10000);
+        h.Send(10000, 10000, true);
+        h.Send(9000, 9000, true);
+        Check(h.Pointer.Scroll == new Vector2(50, 50));
+        Check(actions.Count == 0 && !h.Pointer.Left && h.Pointer.Position == Vector2.Zero);
+        shift = true;
+        h.Send(8000, 8000, true);
+        h.Send(7000, 7000, true);
+        Check(actions.Count == 0 && !h.Pointer.Left);
+        h.Send(7000, 7000);
+        h.Send(7000, 7000, true);
+        h.Send(7000, 6000, true);
+        Check(actions.SequenceEqual(new[] { MissionAction.Overview }));
+    }),
+    ("Keyboard scroll: pen button alone no longer scrolls; hover never scrolls", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Filter.ScrollTrigger = "Control";
+        h.Filter.ReadModifiers = () => new(false, false);
+        h.Send(10000, 10000, true, true);
+        h.Send(9800, 9800, true, true);
+        Check(h.Pointer.Scroll == Vector2.Zero);
+        h.Filter.ReadModifiers = () => new(true, false);
+        int scrolls = 0;
+        h.Filter.SendKeyboardScroll = (x, y, zoom) => { if (x != 0 || y != 0) scrolls++; };
+        h.Send(9800, 9800);
+        h.Send(5000, 5000);
+        Check(scrolls == 0 && !h.Pointer.Left && !h.Pointer.Right);
+    }),
+    ("Acceleration: short fast writing stays precise; long travel gains; window expires", () =>
+    {
+        var c = new AccelerationCurve();
+        c.Apply(Vector2.Zero, Vector2.Zero, 0, 20, 150, 2, 0, 1, 3, 0.1);
+        double time = 0;
+        for (int i = 0; i < 20; i++)
+        {
+            time += 0.002;
+            var mm = new Vector2(i % 2 == 0 ? 1 : -1, 0);
+            Check(c.Apply(mm, mm, time, 20, 150, 2, 0, 1, 3, 0.1) == mm);
+        }
+        for (int i = 0; i < 6; i++)
+        {
+            time += 0.002;
+            var result = c.Apply(new(1, 0), new(1, 0), time, 20, 150, 2, 0, 1, 3, 0.1);
+            if (i < 3) Check(result.X == 1);
+            if (i == 5) Check(result.X == 2);
+        }
+        time += 0.2;
+        Check(c.Apply(new(1, 0), new(1, 0), time, 20, 150, 2, 0, 1, 3, 0.1).X == 1);
+    }),
+    ("Acceleration: slow motion stays precise, fast motion caps gain, scroll unaffected", () =>
+    {
+        using var h = new Harness(relative: true);
+        double time = 0;
+        using var a = new PointerAccelerationFilter { Smoothing = 0, TravelDistance = 0, Clock = () => time };
+        a.Configure((RelativeOutputMode)h.Mode);
+        h.Mode.Elements = [h.Filter, a, h.Bindings];
+        h.Send(10000, 10000);
+        time += 0.02;
+        h.Send(10020, 10000);
+        Check(Vector2.Distance(h.Pointer.Position, new(4, 0)) < 0.001f);
+        time += 0.02;
+        h.Send(10820, 10000);
+        Check(Vector2.Distance(h.Pointer.Position, new(324, 0)) < 0.001f);
+        time += 0.02;
+        h.Send(10820, 10000, true, true);
+        time += 0.02;
+        h.Send(10620, 9800, true, true);
+        Check(h.Pointer.Scroll == new Vector2(10, 10));
+        Check(Vector2.Distance(h.Pointer.Position, new(324, 0)) < 0.001f);
+        time += 0.02;
+        h.Send(20000, 15000);
+        Check(Vector2.Distance(h.Pointer.Position, new(324, 0)) < 0.001f);
+    }),
+    ("Acceleration: rotational direction preserved, rest stays still, gaps reset speed", () =>
+    {
+        var c = new AccelerationCurve();
+        c.Apply(Vector2.Zero, Vector2.Zero, 0, 20, 150, 2, 0, 0.1);
+        var fast = c.Apply(new(3, 4), new(3, 4), 0.01, 20, 150, 2, 0, 0.1);
+        Check(fast == new Vector2(6, 8));
+        Check(c.Apply(Vector2.Zero, Vector2.Zero, 0.02, 20, 150, 2, 20, 0.1) == Vector2.Zero);
+        Check(c.Apply(new(3, 4), new(3, 4), 1, 20, 150, 2, 20, 0.1) == new Vector2(3, 4));
+        c.Reset();
+        Check(c.Apply(new(3, 4), new(3, 4), 2, 20, 150, 2, 20, 0.1) == new Vector2(3, 4));
+    }),
+    ("Acceleration: smoothing converges consistently at different report rates", () =>
+    {
+        foreach (int rate in new[] { 100, 200, 500 })
+        {
+            var c = new AccelerationCurve();
+            c.Apply(Vector2.Zero, Vector2.Zero, 0, 20, 150, 2, 20, 0.1);
+            Vector2 result = default;
+            for (int i = 1; i <= rate; i++)
+                result = c.Apply(new(1, 0), new(200f / rate, 0), i / (double)rate, 20, 150, 2, 20, 0.1);
+            Check(Math.Abs(result.X - 2) < 0.001);
+        }
+    }),
+    ("Acceleration: gain one disables, absolute mode fails open, controls validate", () =>
+    {
+        var c = new AccelerationCurve();
+        c.Apply(Vector2.Zero, Vector2.Zero, 0, 20, 150, 1, 0, 1);
+        Check(c.Apply(new(5, 0), new(5, 0), 0.01, 20, 150, 1, 0, 1) == new Vector2(5, 0));
+        using var h = new Harness();
+        using var a = new PointerAccelerationFilter { MaxGain = double.NaN, Smoothing = -1 };
+        a.Configure(null);
+        h.Mode.Elements = [h.Filter, a, h.Bindings];
+        h.Send(10000, 10000);
+        Check(Vector2.Distance(h.Pointer.Position, new(500, 500)) < 0.001f);
+        Check(a.MaxGain == 2 && a.Smoothing == 0);
+    }),
+    ("Control gestures: threshold, inverse horizontal direction and one action per touch", () =>
+    {
+        using var h = new Harness(relative: true);
+        bool ctrl = true;
+        var actions = new List<MissionAction>();
+        h.Filter.MissionGestures = true;
+        h.Filter.ReadModifiers = () => new(ctrl, true);
+        h.Filter.SendMissionAction = actions.Add;
+        h.Send(10000, 10000, true);
+        h.Send(10900, 10000, true);
+        Check(actions.Count == 0 && !h.Pointer.Left && !h.Pointer.Right);
+        h.Send(11000, 10000, true);
+        h.Send(15000, 10000, true);
+        Check(actions.SequenceEqual(new[] { MissionAction.SpaceLeft }));
+        Check(h.Pointer.Position == Vector2.Zero && h.Pointer.Scroll == Vector2.Zero);
+        h.Send(15000, 10000);
+        h.Send(15000, 10000, true);
+        h.Send(14000, 10000, true);
+        Check(actions.Last() == MissionAction.SpaceRight && actions.Count == 2);
+        ctrl = false;
+        h.Send(12000, 10000, true);
+        Check(!h.Pointer.Left && h.Pointer.Position == Vector2.Zero);
+        h.Send(12200, 10000);
+        Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f);
+        h.Send(12200, 10000, true);
+        Check(h.Pointer.Left);
+    }),
+    ("Control gestures: up/down overview actions, hover ignored, normal scroll resumes", () =>
+    {
+        using var h = new Harness(relative: true);
+        bool ctrl = true;
+        var actions = new List<MissionAction>();
+        h.Filter.MissionGestures = true;
+        h.Filter.ReadModifiers = () => new(ctrl, true);
+        h.Filter.SendMissionAction = actions.Add;
+        h.Send(10000, 10000);
+        h.Send(10000, 5000);
+        Check(actions.Count == 0);
+        h.Send(10000, 10000, true);
+        h.Send(10000, 11000, true);
+        Check(actions.SequenceEqual(new[] { MissionAction.Dismiss }));
+        h.Send(10000, 10000);
+        h.Send(10000, 10000, true);
+        h.Send(10000, 9000, true);
+        Check(actions.SequenceEqual(new[] { MissionAction.Dismiss, MissionAction.Overview }));
+        h.Send(10000, 5000, true);
+        Check(actions.Count == 2);
+        h.Send(10000, 5000);
+        ctrl = false;
+        h.Send(10000, 5000, true, true);
+        h.Send(9800, 4800, true, true);
+        Check(h.Pointer.Scroll == new Vector2(10, 10));
+    }),
+    ("Control gestures: proximity loss resets and disabled mode leaves Control-click alone", () =>
+    {
+        using var h = new Harness(relative: true);
+        var actions = new List<MissionAction>();
+        h.Filter.ReadModifiers = () => new(true, true);
+        h.Filter.SendMissionAction = actions.Add;
+        h.Send(10000, 10000, true);
+        Check(h.Pointer.Left && actions.Count == 0);
+        h.Filter.MissionGestures = true;
+        h.Send(10000, 10000, true);
+        h.Send(11000, 10000, true);
+        h.Mode.Read(new OutOfRangeReport([]));
+        h.Send(30000, 10000, true);
+        Check(actions.Count == 1);
+        h.Send(31000, 10000, true);
+        Check(actions.Count == 2);
+    }),
+    ("Relative: scroll anchors, lifting repositions, release does not jump", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Send(10000, 10000);
+        h.Send(10200, 10000);
+        Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f);
+        h.Send(10200, 10000, true, true);
+        h.Send(10000, 9800, true, true);
+        Check(h.Pointer.Scroll == new Vector2(10, 10));
+        h.Send(30000, 18000, false, true);
+        h.Send(30000, 18000, true, true);
+        h.Send(29800, 17800, true, true);
+        Check(h.Pointer.Scroll == new Vector2(20, 20));
+        Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f);
+        h.Send(31000, 19000, true, false);
+        Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f && !h.Pointer.Left);
+        h.Send(31200, 19000);
+        Check(Vector2.Distance(h.Pointer.Position, new(80, 0)) < 0.001f);
+        h.Send(31200, 19000, true);
+        Check(h.Pointer.Left);
+    }),
+    ("Relative: proximity return rebases and repeated scroll does not drift", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Send(10000, 10000);
+        h.Send(10200, 10000);
+        for (int i = 0; i < 5; i++)
+        {
+            h.Send(20000, 10000, true, true);
+            h.Send(18000, 10000, true, true);
+            h.Send(30000, 10000);
+            Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f);
+        }
+        h.Mode.Read(new OutOfRangeReport([]));
+        h.Send(5000, 5000);
+        Check(Vector2.Distance(h.Pointer.Position, new(40, 0)) < 0.001f);
+        h.Send(5200, 5000);
+        Check(Vector2.Distance(h.Pointer.Position, new(80, 0)) < 0.001f);
+    }),
+    ("Contact click: hover does not click; touch replaces left; release waits for lift", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Filter.ClickButtonNumber = 2;
+        h.Send(10000, 10000, right: true);
+        Check(!h.Pointer.Right && !h.Pointer.Left);
+        h.Send(10000, 10000, true, right: true);
+        Check(h.Pointer.Right && !h.Pointer.Left);
+        h.Send(10200, 10000, true, right: true);
+        Check(h.Pointer.Right && !h.Pointer.Left);
+        h.Send(10200, 10000, true);
+        Check(!h.Pointer.Right && !h.Pointer.Left);
+        h.Send(10200, 10000);
+        h.Send(10200, 10000, true);
+        Check(h.Pointer.Left);
+    }),
+    ("Contact click: middle option, scroll priority, range loss and disposal release", () =>
+    {
+        using var h = new Harness(relative: true);
+        h.Filter.ClickButtonNumber = 2;
+        h.Filter.ClickType = "Middle";
+        h.Send(10000, 10000, true, right: true);
+        Check(h.Pointer.Events.Contains("down:Middle") && !h.Pointer.Left);
+        h.Send(9800, 10000, true, true, true);
+        Check(h.Pointer.Events.Contains("up:Middle") && !h.Pointer.Left);
+        h.Send(9600, 10000, true, true, true);
+        Check(h.Pointer.Scroll.X == 10);
+        h.Send(9600, 10000);
+        h.Send(9600, 10000, true, right: true);
+        h.Mode.Read(new OutOfRangeReport([]));
+        Check(h.Pointer.Events.Count(e => e == "up:Middle") == 2);
+        h.Send(5000, 5000, true, right: true);
+        h.Filter.Dispose();
+        Check(h.Pointer.Events.Count(e => e == "up:Middle") == 3);
+    }),
+    ("Up/left motion scrolls down/right; pointer stays anchored", () =>
+    {
+        using var h = new Harness();
+        h.Send(10000, 10000);
+        h.Send(10200, 10200, true, true);
+        h.Send(10000, 10000, true, true);
+        Check(h.Pointer.Scroll == new Vector2(10, 10));
+        Check(Vector2.Distance(h.Pointer.Position, new Vector2(500, 500)) < 0.001f);
+        Check(!h.Pointer.Left && !h.Pointer.Right && h.Pointer.Pressure == 0);
+    }),
+    ("Down/right motion and axis reversal", () =>
+    {
+        using var h = new Harness();
+        h.Filter.ReverseX = h.Filter.ReverseY = true;
+        h.Send(10000, 10000, true, true);
+        h.Send(10200, 10200, true, true);
+        Check(h.Pointer.Scroll == new Vector2(10, 10));
+    }),
+    ("Hover with button held produces no scrolling", () =>
+    {
+        using var h = new Harness();
+        h.Send(10000, 10000, false, true);
+        h.Send(20000, 20000, false, true);
+        Check(h.Pointer.Scroll == Vector2.Zero);
+        Check(Vector2.Distance(h.Pointer.Position, new Vector2(500, 500)) < 0.001f);
+    }),
+    ("Lifting and repositioning does not jump or carry fractions", () =>
+    {
+        using var h = new Harness();
+        h.Send(10000, 10000, true, true);
+        h.Send(9990, 9990, true, true);
+        h.Send(30000, 15000, false, true);
+        h.Send(30000, 15000, true, true);
+        Check(h.Pointer.Scroll == Vector2.Zero);
+        h.Send(29800, 14800, true, true);
+        Check(h.Pointer.Scroll == new Vector2(10, 10));
+    }),
+    ("Fractional movements accumulate; stationary pen emits nothing", () =>
+    {
+        using var h = new Harness();
+        h.Send(10000, 10000, true, true);
+        for (int i = 1; i <= 200; i++) h.Send(10000 - i, 10000, true, true);
+        Check(h.Pointer.Scroll.X == 10 && h.Pointer.Scroll.Y == 0);
+        int count = h.Pointer.ScrollCalls;
+        h.Send(9800, 10000, true, true);
+        Check(h.Pointer.ScrollCalls == count);
+    }),
+    ("Button release while touching suppresses nib until lift", () =>
+    {
+        using var h = new Harness();
+        h.Send(10000, 10000, true, true);
+        h.Send(12000, 12000, true, false);
+        Check(!h.Pointer.Left && Vector2.Distance(h.Pointer.Position, new Vector2(600, 600)) < 0.001f);
+        h.Send(13000, 13000, true, false);
+        Check(!h.Pointer.Left);
+        h.Send(13000, 13000);
+        h.Send(13000, 13000, true);
+        Check(h.Pointer.Left);
+    }),
+    ("Pressing scroll during an existing drag releases left button", () =>
+    {
+        using var h = new Harness();
+        h.Send(10000, 10000, true);
+        Check(h.Pointer.Left);
+        h.Send(10000, 10000, true, true);
+        Check(!h.Pointer.Left && h.Pointer.Pressure == 0);
+        Check(h.Pointer.Events.Contains("up:Left"));
+    }),
+    ("Normal nib, right click, and drag survive outside gesture", () =>
+    {
+        using var h = new Harness();
+        h.Send(10000, 10000, true);
+        h.Send(10200, 10200, true);
+        Check(h.Pointer.Left && Vector2.Distance(h.Pointer.Position, new Vector2(510, 510)) < 0.001f);
+        h.Send(10200, 10200);
+        h.Send(10200, 10200, right: true);
+        Check(!h.Pointer.Left && h.Pointer.Right);
+        h.Send(10200, 10200);
+        Check(!h.Pointer.Right);
+    }),
+    ("Other buttons and parser-owned arrays are preserved", () =>
+    {
+        using var h = new Harness();
+        bool[] buttons = [true, true, false];
+        IDeviceReport report = new IntuosV3ExtendedReport
+        { Position = new(10000, 10000), Pressure = 1000, PenButtons = buttons, NearProximity = true, Raw = [1, 2, 3] };
+        h.Mode.Read(report);
+        Check(buttons[0] && buttons[1]);
+        Check(!((ITabletReport)report).PenButtons[0] && ((ITabletReport)report).PenButtons[1]);
+        Check(report.Raw.SequenceEqual(new byte[] { 1, 2, 3 }));
+        Check(h.Pointer.Right);
+    }),
+    ("Proximity loss resets gesture and anchors fresh on return", () =>
+    {
+        using var h = new Harness();
+        h.Send(10000, 10000, true, true);
+        h.Mode.Read(new OutOfRangeReport([]));
+        h.Send(30000, 10000, true, true);
+        Check(h.Pointer.Scroll == Vector2.Zero);
+        Check(Vector2.Distance(h.Pointer.Position, new Vector2(1500, 500)) < 0.001f);
+        h.Send(29800, 10000, true, true);
+        Check(h.Pointer.Scroll.X == 10);
+    }),
+    ("NearProximity false resets before processing motion", () =>
+    {
+        using var h = new Harness();
+        h.Send(10000, 10000, true, true);
+        h.Mode.Read(new IntuosV3ExtendedReport
+        { Position = new(30000, 10000), Pressure = 0, PenButtons = [false, false, false], NearProximity = false, Raw = [] });
+        h.Send(30000, 10000, true, true);
+        Check(h.Pointer.Scroll == Vector2.Zero);
+    }),
+    ("Unrelated reports pass through", () =>
+    {
+        var filter = new PenPanScrollFilter();
+        IDeviceReport? received = null;
+        filter.Emit += r => received = r;
+        var report = new AuxReport();
+        filter.Consume(report);
+        Check(ReferenceEquals(received, report));
+    }),
+    ("Disposal and disabled filter restore ordinary nib behavior", () =>
+    {
+        using var h = new Harness();
+        h.Send(10000, 10000, true, true);
+        h.Filter.Dispose();
+        h.Send(12000, 12000, true);
+        Check(h.Pointer.Left && Vector2.Distance(h.Pointer.Position, new Vector2(600, 600)) < 0.001f);
+        h.Mode.Elements = [h.Bindings];
+        h.Send(12000, 12000);
+        h.Send(12200, 12200, true);
+        Check(h.Pointer.Left && Vector2.Distance(h.Pointer.Position, new Vector2(610, 610)) < 0.001f);
+    }),
+    ("Sensitivity zero disables one axis; invalid settings normalize", () =>
+    {
+        using var h = new Harness();
+        h.Filter.SensitivityX = 0;
+        h.Filter.SensitivityY = double.NaN;
+        h.Filter.ButtonNumber = 0;
+        h.Send(10000, 10000, true, true);
+        h.Send(9800, 9800, true, true);
+        Check(h.Pointer.Scroll == new Vector2(0, 10));
+        Check(h.Filter.ButtonNumber == 1 && h.Filter.SensitivityY == 10);
+    }),
+    ("Unconfigured filter fails open", () =>
+    {
+        var filter = new PenPanScrollFilter();
+        IDeviceReport report = new IntuosV3ExtendedReport
+        { Position = new(10000, 10000), Pressure = 1000, PenButtons = [true, false, false], NearProximity = true };
+        filter.Consume(report);
+        Check(((ITabletReport)report).Pressure == 1000 && ((ITabletReport)report).PenButtons[0]);
+    }),
+    ("Eraser remains usable", () =>
+    {
+        using var h = new Harness();
+        h.Mode.Read(new IntuosV3ExtendedReport
+        { Position = new(10000, 10000), Pressure = 1000, PenButtons = [false, false, false], NearProximity = true, Eraser = true, Raw = [] });
+        Check(h.Pointer.Left);
+    })
+};
+int failures = 0;
+foreach (var (name, run) in tests)
+{
+    try { run(); Console.WriteLine($"PASS {name}"); }
+    catch (Exception e) { failures++; Console.WriteLine($"FAIL {name}: {e.Message}"); }
+}
+Console.WriteLine($"{tests.Length - failures}/{tests.Length} passed");
+return failures == 0 ? 0 : 1;
+
+static void Check(bool result, [System.Runtime.CompilerServices.CallerArgumentExpression("result")] string expression = "")
+{
+    if (!result) throw new Exception("Assertion failed: " + expression);
+}
+
+sealed class Harness : IDisposable
+{
+    public FakePointer Pointer { get; } = new();
+    public OutputMode Mode { get; }
+    public PenPanScrollFilter Filter { get; } = new() { ReadModifiers = () => default };
+    public BindingHandler Bindings { get; }
+
+    public Harness(bool relative = false)
+    {
+        var tablet = new TabletReference
+        {
+            Properties = new TabletConfiguration
+            {
+                Name = "Wacom PTK-470",
+                DigitizerIdentifiers = [],
+                Specifications = new TabletSpecifications
+                {
+                    Digitizer = new DigitizerSpecifications { Width = 187, Height = 105, MaxX = 37400, MaxY = 21000 },
+                    Pen = new PenSpecifications { MaxPressure = 8191, ButtonCount = 3 }
+                }
+            }
+        };
+        Pointer.Relative = relative;
+        if (relative)
+            Mode = new FakeRelativeMode { Pointer = Pointer, Tablet = tablet, Sensitivity = new(40, 40), ResetTime = TimeSpan.FromMinutes(1) };
+        else
+            Mode = new FakeMode
+            {
+                Pointer = Pointer, Tablet = tablet,
+                Input = new Area(187, 105, new(93.5f, 52.5f), 0),
+                Output = new Area(1870, 1050, new(935, 525), 0)
+            };
+        Filter.Configure(tablet, Mode);
+        Bindings = new(tablet)
+        {
+            Tip = new ThresholdBindingState { Binding = new AdaptiveBinding(PenAction.Tip) { MouseButtonHandler = Pointer } },
+            Eraser = new ThresholdBindingState { Binding = new AdaptiveBinding(PenAction.Eraser) { MouseButtonHandler = Pointer } }
+        };
+        Bindings.PenButtons[0] = new BindingState { Binding = new AdaptiveBinding(PenAction.BarrelButton1) { MouseButtonHandler = Pointer } };
+        Bindings.PenButtons[1] = new BindingState { Binding = new AdaptiveBinding(PenAction.BarrelButton1) { MouseButtonHandler = Pointer } };
+        Mode.Elements = [Filter, Bindings];
+    }
+
+    public void Send(float x, float y, bool contact = false, bool button = false, bool right = false) =>
+        Mode.Read(new IntuosV3ExtendedReport
+        { Position = new(x, y), Pressure = contact ? 1000u : 0u, PenButtons = [button, right, false], NearProximity = true, Raw = [] });
+
+    public void Dispose() => Mode.Dispose();
+}
+
+sealed class FakeMode : AbsoluteOutputMode
+{
+    public override IAbsolutePointer? Pointer { get; set; } = null!;
+}
+
+sealed class FakeRelativeMode : RelativeOutputMode
+{
+    public override IRelativePointer? Pointer { get; set; } = null!;
+}
+
+sealed class FakePointer : IRelativePointer, IAbsolutePointer, IMouseScrollHandler, IMouseButtonHandler, IPressureHandler, ISynchronousPointer
+{
+    public Vector2 Position, Scroll;
+    public bool Relative;
+    public float Pressure;
+    public bool Left, Right;
+    public int ScrollCalls;
+    public List<string> Events { get; } = [];
+    public void SetPosition(Vector2 position) => Position = Relative ? Position + position : position;
+    public void ScrollHorizontally(int amount) { Scroll.X += amount; ScrollCalls++; }
+    public void ScrollVertically(int amount) { Scroll.Y += amount; ScrollCalls++; }
+    public void MouseDown(MouseButton button)
+    {
+        Events.Add($"down:{button}");
+        if (button == MouseButton.Left) Left = true;
+        if (button == MouseButton.Right) Right = true;
+    }
+    public void MouseUp(MouseButton button)
+    {
+        Events.Add($"up:{button}");
+        if (button == MouseButton.Left) Left = false;
+        if (button == MouseButton.Right) Right = false;
+    }
+    public void SetPressure(float pressure) => Pressure = pressure;
+    public void Reset() { Left = Right = false; }
+    public void Flush() { }
+}
+
+sealed class AuxReport : IDeviceReport
+{
+    public byte[] Raw { get; set; } = [];
+}
