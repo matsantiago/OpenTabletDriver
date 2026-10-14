@@ -59,7 +59,12 @@ namespace HidSharp.Platform.MacOS
                         handle = NativeMethods.IOHIDDeviceCreate(IntPtr.Zero, service);
                         if (handle != IntPtr.Zero)
                         {
-                            var ret = NativeMethods.IOHIDDeviceOpen(handle);
+                            // Bosto's composite HID interface also drives the system cursor.
+                            // Seize it so only the configured tablet output moves the cursor.
+                            var options = Device.VendorID == 3793 && Device.ProductID == 30753
+                                ? NativeMethods.IOOptionBits.SeizeDevice
+                                : NativeMethods.IOOptionBits.None;
+                            var ret = NativeMethods.IOHIDDeviceOpen(handle, options);
                             if (ret == NativeMethods.IOReturn.Success) { break; }
 
                             NativeMethods.CFRelease(handle);
