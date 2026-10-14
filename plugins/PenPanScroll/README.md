@@ -1,3 +1,5 @@
+> Maintained inside [matsantiago/OpenTabletDriver](https://github.com/matsantiago/OpenTabletDriver) under `plugins/PenPanScroll`. The standalone fork is historical; future changes belong here. See the root `PERSONAL_DRIVERS.md` for current build instructions.
+
 # Pen Pan/Scroll for OpenTabletDriver
 
 Wacom-style pen button-pan/scroll for [OpenTabletDriver](https://github.com/OpenTabletDriver/OpenTabletDriver) on **macOS**.

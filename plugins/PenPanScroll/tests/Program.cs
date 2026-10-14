@@ -1,3 +1,6 @@
+// Reports are deliberately boxed as IDeviceReport to test mutation through
+// OTD's real pipeline; changing to the struct type changes test semantics.
+#pragma warning disable CA1859
 using System.Numerics;
 using PenPanScroll;
 using OpenTabletDriver.Configurations.Parsers.Wacom.IntuosV3;

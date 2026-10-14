@@ -18,6 +18,11 @@
     <IsPackable>true</IsPackable>
   </PropertyGroup>
 
+  <PropertyGroup>
+    <!-- This personal fork ships the Bosto macOS HID fix in-tree. -->
+    <UseLocalHidSharp Condition="'$(UseLocalHidSharp)' == ''">true</UseLocalHidSharp>
+  </PropertyGroup>
+
   <ItemGroup Label="NuGet Packages">
     <PackageReference Include="HidSharpCore" Version="1.3.0" Condition="'$(UseLocalHidSharp)' != 'true'" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.1" />
@@ -25,7 +30,7 @@
   </ItemGroup>
 
   <ItemGroup Label="Project References">
-    <ProjectReference Include="../../HIDSharpCore/HidSharp/HidSharp.csproj" Condition="'$(UseLocalHidSharp)' == 'true'" />
+    <ProjectReference Include="../third-party/HIDSharpCore/HidSharp/HidSharp.csproj" Condition="'$(UseLocalHidSharp)' == 'true'" />
     <ProjectReference Include="..\OpenTabletDriver.Plugin\OpenTabletDriver.Plugin.csproj" />
     <ProjectReference Include="..\OpenTabletDriver.Native\OpenTabletDriver.Native.csproj" />
     <ProjectReference Include="..\OpenTabletDriver.Configurations\OpenTabletDriver.Configurations.csproj" />

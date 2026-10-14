@@ -4,6 +4,6 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
-    <OtdDirectory Condition="'$(OtdDirectory)' == ''">/Applications/OpenTabletDriver.app/Contents/MacOS</OtdDirectory>
+    <OtdDirectory Condition="'$(OtdDirectory)' == ''">$(MSBuildThisFileDirectory)../../OpenTabletDriver.Desktop/bin/Release/net10.0</OtdDirectory>
   </PropertyGroup>
 </Project>
