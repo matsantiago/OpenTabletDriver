@@ -31,4 +31,18 @@ To package the native driver, use GNU Bash and GNU coreutils on PATH:
 bash ./eng/bash/package.sh --signed true --runtime osx-arm64 --package macos
 ```
 
-The existing package script creates `dist/OpenTabletDriver.app`. The plugin remains a separate build/install artifact in the same repository; its app-data configuration is not stored in Git. Re-signing/replacing the driver may require re-adding macOS Input Monitoring and Device Control and Data Access permissions. Updating the plugin alone retains the app signature.
+The existing package script creates `dist/OpenTabletDriver.app`. The plugin remains a separate build/install artifact in the same repository; its app-data configuration is not stored in Git. Updating the plugin alone retains the app signature.
+
+## Persistent signing on this Mac
+
+For personal builds, configure a local signing identity once:
+
+```sh
+python3 scripts/setup-macos-signing.py
+```
+
+macOS may ask you to authorize trusting the certificate for code signing. The private key is imported into your default Keychain, accessible to `/usr/bin/codesign`; temporary key files are removed. The public certificate and its fingerprint are saved under `~/Library/Application Support/OpenTabletDriver/Signing/`, outside Git. This local certificate is for personal builds, not notarized distribution to other Macs.
+
+The normal `--signed true` package command automatically reuses that identity. `OTD_CODESIGN_IDENTITY` can override it with an existing signing identity, including a Developer ID identity. A configured identity that is unavailable causes packaging to fail rather than falling back to ad-hoc signing. Machines without a configured identity retain upstream's ad-hoc signing behavior.
+
+After switching from ad-hoc signing, re-add the app in macOS Input Monitoring and Accessibility once. Subsequent builds signed with the same certificate and identifiers should retain those grants. Keep the certificate and its private key: recreating the identity, losing the key or switching signing identities can require granting permissions again. The local certificate is valid for ten years.
