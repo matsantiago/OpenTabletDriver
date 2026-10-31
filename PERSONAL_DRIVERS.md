@@ -4,13 +4,15 @@ This fork is the single maintained repository for Matheus Santiago's native ARM6
 
 | Directory | Purpose | Original source | Imported commit |
 |---|---|---|---|
-| Driver at repository root | OpenTabletDriver, followed via `upstream` | https://github.com/OpenTabletDriver/OpenTabletDriver | `35b2e84e` |
+| Driver at repository root | OpenTabletDriver, followed via `upstream` | https://github.com/OpenTabletDriver/OpenTabletDriver | `f3927ac1` (v0.6.8.1) |
 | `plugins/PenPanScroll` | Scroll, Mission Control, middle click, zoom, acceleration and diagnostics | https://github.com/djoliverm/otd-penpanscroll | Customized fork `f42d4df` |
 | `third-party/HIDSharpCore` | HID dependency with exclusive capture for Bosto BT-12HD on macOS | https://github.com/OpenTabletDriver/HIDSharpCore | Patched commit `1f8cad2` |
 
 Both imports preserve their Git history. Their existing license and copyright notices remain in their own directories. The driver uses the in-tree HID dependency by default; `-p:UseLocalHidSharp=false` selects the upstream NuGet package for comparison. No sibling clones or submodules are needed.
 
 Only the driver upstream is followed routinely. Plugins and HID changes are maintained directly in this repository; their original sources are provenance, not update channels. Existing standalone clones and the old plugin fork remain historical backups and are not needed for new builds.
+
+The v0.6.8.1 upstream merge retains the customized PenPanScroll sources and the in-tree HID dependency, including exclusive capture for the Bosto BT-12HD. Rebuild the plugin against the updated driver assemblies before installing both.
 
 ## Build and test
 
